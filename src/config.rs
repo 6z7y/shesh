@@ -1,17 +1,51 @@
-use std::{env, fs, io::Write, path::PathBuf};
+use std::{
+    env,
+    fs::{self, OpenOptions},
+    io::Write,
+    path::PathBuf
+};
+
+use crate::{commands,shell};
 
 pub struct Config {
-    pub prompt: String,
+    pub prompt: Option<String>,
     pub startup: Vec<String>,
 }
 
 impl Config {
     fn default() -> Self {
         Self {
-            prompt: "shesh> ".to_string(),
+            prompt: Some("#shesh> ".to_string()),
             startup: Vec::new(),
         }
     }
+}
+
+// config
+
+fn get_home_dir() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            eprintln!("Warning: HOME not set, using current directory");
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        })
+}
+
+fn get_config_path() -> PathBuf {
+    get_home_dir().join(".config/shesh/shesh.24")
+}
+
+fn ensure_config_dirs(config_path: &std::path::Path) {
+    if let Some(parent) = config_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+}
+
+
+fn create_default_config(config_path: &PathBuf) {
+    let default_content = "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"";
+    let _ = fs::write(config_path, default_content);
 }
 
 pub fn init() -> Config {
@@ -25,29 +59,6 @@ pub fn init() -> Config {
     load_config(&config_path)
 }
 
-fn get_config_path() -> PathBuf {
-    get_home_dir().join(".config/shesh/shesh.24")
-}
-
-fn get_home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Warning: HOME not set, using current directory");
-            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        })
-}
-
-fn ensure_config_dirs(config_path: &std::path::Path) {
-    if let Some(parent) = config_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-}
-
-fn create_default_config(config_path: &PathBuf) {
-    let default_content = "prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"";
-    let _ = fs::write(config_path, default_content);
-}
 
 fn load_config(path: &PathBuf) -> Config {
     let mut config = Config::default();
@@ -66,7 +77,11 @@ fn load_config(path: &PathBuf) -> Config {
         }
         
         if let Some(comment) = trimmed.strip_prefix('#') {
-            if comment.trim().eq_ignore_ascii_case("startup") {
+            let commented_line = comment.trim();
+            if commented_line.starts_with("prompt") {
+                // Prompt is commented out - use default
+                config.prompt = None;
+            } else if commented_line.eq_ignore_ascii_case("startup") {
                 in_startup = true;
             }
             continue;
@@ -76,52 +91,64 @@ fn load_config(path: &PathBuf) -> Config {
             config.startup.push(trimmed.to_string());
         } else if let Some((key, value)) = trimmed.split_once('=') {
             if key.trim() == "prompt" {
-                config.prompt = value.trim().trim_matches('"').to_string();
+                // Prompt is not commented out - use custom prompt
+                config.prompt = Some(value.trim().trim_matches('"').to_string());
             }
         }
     }
     config
 }
 
-pub fn save_history(cmd: &str) {
-    let history_path = get_home_dir().join(".local/share/shesh/history");
-    if let Some(parent) = history_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    
-    if let Ok(mut file) = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path) 
-    {
-        let _ = writeln!(file, "{}", cmd);
-    }
-}
-
-pub fn load_history() -> Vec<String> {
-    let history_path = get_home_dir().join(".local/share/shesh/history");
-    if let Ok(content) = fs::read_to_string(history_path) {
-        content.lines().map(|s| s.to_string()).collect()
-    } else {
-        Vec::new()
-    }
-}
-
 pub fn run_startup(config: &Config) {
-    use crate::{commands, shell, builtins};
-    
     for cmd_line in &config.startup {
-        let parts = commands::parse_input(cmd_line);
-        if let Some((cmd, args_vec)) = parts.split_first() {
-            let args: Vec<&str> = args_vec.iter().map(|s| s.as_str()).collect();
+        let parts = shell::parse_input(cmd_line).unwrap_or_default();
+        if let Some((cmd, args)) = parts.split_first() {
+            // Combine command and arguments into a single string for shell::execute
+            let full_cmd = if args.is_empty() {
+                cmd.clone()
+            } else {
+                format!("{} {}", cmd, args.join(" "))
+            };
             
-            if let Some(res) = builtins::handle_command(cmd, &args) {
-                if let Err(e) = res {
-                    eprintln!("Startup builtin failed: {}", e);
-                }
-            } else if let Err(e) = shell::execute(cmd, &args) {
+            if let Err(e) = shell::execute(&full_cmd) {
                 eprintln!("Startup command failed: {}", e);
             }
         }
+    }
+}
+
+//-----------------------
+//history
+pub fn history_file_path() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".local/share/shesh")
+        .join("history")
+}
+
+// Append a command to the history file and return it if valid
+pub fn append_to_history(command: &str) {
+    let path = history_file_path();
+
+   // Create parent directories if needed
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("Failed to create directory: {}", e);
+            return;
+        }
+    } 
+
+    match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", command) {
+                eprintln!("Failed to write to history: {}", e);
+            }
+        }
+        Err(e) => eprintln!("Failed to open history file: {}", e),
     }
 }

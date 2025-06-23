@@ -1,7 +1,21 @@
 [package]
 name = "shesh"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 
 [dependencies]
-termion = "^4.0"
+anyhow = "1.0.98"
+async-trait = "0.1.88"
+chrono = "0.4.41"
+directories = "6.0.0"
+dirs = "6.0.0"
+lazy_static = "1.5.0"
+md5 = "0.7.0"
+nu-ansi-term = "0.50.1"
+reedline = "0.40.0"
+regex = "1.11.1"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+shell-words = "1.1.0"
+shellexpand = "3.1.1"
+tokio = { version = "1.45.1", features = ["full"] }

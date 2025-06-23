@@ -1,50 +1,97 @@
-mod builtins;
-mod commands;
 mod config;
-mod input;
+mod commands;
+mod completion;
 mod shell;
+mod prompt;
 mod utils;
+mod validator;
 
-use std::io::Result;
-use commands::CommandSeparator;
+use nu_ansi_term::{Color, Style};
+use reedline::{
+    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal
+};
 
-fn main() -> Result<()> { 
+use crate::{
+    completion::create_default_completer, 
+    prompt::SimplePrompt,
+    validator::MyValidator
+};
+
+fn main() {
     let config = config::init();
     config::run_startup(&config);
 
+    let history_path = config::history_file_path();
+    
+    // Create history with file backing
+    let history = FileBackedHistory::with_file(1000, history_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to load history: {}", e);
+            FileBackedHistory::default()
+        });
+
+    // Create completer
+    let completer = create_default_completer();
+
+    let completion_menu = Box::new(
+        ColumnarMenu::default()
+            .with_name("completion_menu")
+            .with_column_width(Some(20))
+    );
+
+    let mut keybindings = default_emacs_keybindings();
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu("completion_menu".to_string()),
+            ReedlineEvent::MenuNext,
+        ]),
+    );
+
+    keybindings.add_binding(
+        KeyModifiers::SHIFT,
+        KeyCode::BackTab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu("completion_menu".to_string()),
+            ReedlineEvent::MenuPrevious,
+        ]),
+    );
+
+    let edit_mode = Box::new(Emacs::new(keybindings));
+    let validator = Box::new(MyValidator);
+    
+    // Create command line editor
+    let mut line_editor = Reedline::create()
+        .with_history(Box::new(history))
+        .with_completer(completer)
+        .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
+        .with_edit_mode(edit_mode)
+        .with_validator(validator)
+        .with_hinter(Box::new(
+            DefaultHinter::default()
+                .with_style(Style::new().italic().fg(Color::LightGray))
+                .with_min_chars(1)
+        ));
+
+    let prompt = SimplePrompt::new(&config);
+    
     loop {
-        let input = input::read_line_raw(&config::load_history());
-        let input = input.trim().split('#').next().unwrap().trim();
-        if input.is_empty() { continue; }
-
-        // Expand aliases
-        let expanded_line = builtins::expand_aliases(input);
-        config::save_history(&expanded_line);
-
-        // Split commands
-        let tokens = commands::split_commands(&expanded_line);
-        let mut last_success = true;
-        let mut background_next = false;
-
-        for (cmd_str, separator) in tokens {
-            let background = background_next;
-            background_next = false;
-
-            match separator {
-                CommandSeparator::AndAnd if !last_success => {
-                    // Skip this command because previous failed
-                    continue;
-                },
-                CommandSeparator::Background => {
-                    background_next = true;
-                    // Continue to next command without executing this one as foreground
-                    continue;
-                },
-                _ => {}
+        match line_editor.read_line(&prompt) {
+            Ok(Signal::Success(buffer)) => {
+                let trimmed = buffer.trim();
+                if !trimmed.is_empty() {
+                    config::append_to_history(trimmed);
+                    if let Err(e) = shell::execute(trimmed) {
+                        if !e.contains("Command failed with code") {
+                            eprintln!("\x1b[31mError: {}\x1b[0m", e);
+                        }
+                    }
+                }
             }
-
-            // Execute the command
-            last_success = commands::process_command(&cmd_str, background);
+            Ok(Signal::CtrlD) => break,
+            Ok(Signal::CtrlC) => continue,
+            Err(e) => eprintln!("Readline error: {:?}", e),
         }
     }
 }
