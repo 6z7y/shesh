@@ -5,7 +5,7 @@ use std::{
     path::PathBuf
 };
 
-use crate::{commands,shell};
+use crate::shell;
 
 pub struct Config {
     pub prompt: Option<String>,

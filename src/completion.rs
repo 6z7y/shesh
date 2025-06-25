@@ -60,48 +60,31 @@ impl MyCompleter {
         commands
     }
 
-    /// Get cache file path for a specific command
+    /// Get path to cache file for a command
     fn get_cache_path(&self, cmd: &str) -> PathBuf {
         self.cache_dir.join(format!("{}.24", sanitize_filename(cmd)))
     }
 
-    /// Load cache for a command from disk
-    fn load_subcommands(&mut self, cmd: &str) -> Vec<String> {
-        let cache_file = self.get_cache_path(cmd);
-
-        if cache_file.exists() {
-            if let Ok(file) = OpenOptions::new().read(true).open(&cache_file) {
-                let reader = BufReader::new(file);
-                let subcommands: Vec<String> = reader
-                    .lines()
-                    .filter_map(Result::ok)
-                    .filter(|line| !line.trim().is_empty())
-                    .collect();
-
-                if !subcommands.is_empty() {
-                    self.subcommand_cache.insert(cmd.to_string(), subcommands.clone());
-                    return subcommands;
-                }
-            }
-        } else {
-            let subcommands = self.extract_subcommands(cmd);
-            if !subcommands.is_empty() {
-                let _ = self.save_subcommands(cmd, &subcommands);
-                self.subcommand_cache.insert(cmd.to_string(), subcommands.clone());
-                return subcommands;
-            }
+    /// Get subcommands for a command, using cache when available
+    fn get_subcommands(&mut self, cmd: &str) -> Vec<String> {
+        if let Some(cached) = self.load_from_cache(cmd) {
+            return cached;
         }
 
-        Vec::new()
+        let subcommands = self.extract_subcommands(cmd);
+        if !subcommands.is_empty() {
+            let _ = self.save_to_cache(cmd, &subcommands);
+            self.subcommand_cache.insert(cmd.to_string(), subcommands.clone());
+        }
+
+        subcommands
     }
 
+    /// Save subcommands to cache file
+    fn save_to_cache(&self, cmd: &str, subcommands: &[String]) -> Result<(), std::io::Error> {
+        let path = self.get_cache_path(cmd);
 
-    /// Save command cache to disk
-    fn save_subcommands(&self, cmd: &str, subcommands: &[String]) -> Result<(), std::io::Error> {
-        let cache_file = self.get_cache_path(cmd);
-
-        // make file if not found
-        if let Some(parent) = cache_file.parent() {
+        if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
@@ -109,62 +92,61 @@ impl MyCompleter {
             .create(true)
             .write(true)
             .truncate(true)
-            .open(cache_file)?;
-        
+            .open(path)?;
+
         let mut writer = BufWriter::new(file);
-        for subcmd in subcommands {
-            writeln!(writer, "{}", subcmd)?;
+        for sub in subcommands {
+            writeln!(writer, "{}", sub)?;
         }
+
         Ok(())
     }
 
-    /// Extract subcommands by running `cmd --help` and parsing output
+    /// Try to load cached subcommands from disk
+    fn load_from_cache(&self, cmd: &str) -> Option<Vec<String>> {
+        let cache_file = self.get_cache_path(cmd);
+        if !cache_file.exists() {
+            return None;
+        }
+
+        let file = OpenOptions::new().read(true).open(&cache_file).ok()?;
+        let reader = BufReader::new(file);
+
+        let subcommands: Vec<String> = reader
+            .lines()
+            .filter_map(Result::ok)
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+
+        if subcommands.is_empty() {
+            return None;
+        }
+
+        Some(subcommands)
+    }
+
+    /// Extract subcommands by parsing `cmd --help`
     fn extract_subcommands(&self, cmd: &str) -> Vec<String> {
-        let output = match Command::new(cmd).arg("--help").output() {
-            Ok(output) => output,
-            Err(_) => return Vec::new(),
+        let output = match Command::new(cmd).arg("--help").output().ok() {
+            Some(output) => output,
+            None => return Vec::new(),
         };
+        let help = String::from_utf8_lossy(&output.stdout);
+        
+        let mut subs = Vec::new();
 
-        let help_text = String::from_utf8_lossy(&output.stdout);
-        let mut subcommands: Vec<String> = Vec::new();
-
-        for line in help_text.lines() {
-            if line.starts_with("  ") /* && !line.starts_with("  -") */ {
+        for line in help.lines() {
+            if line.starts_with("  ") {
                 if let Some(token) = line.split_whitespace().next() {
-                    // Filter out invalid subcommands
-                    if token.len() > 1
-                        && !token.contains('<')
-                        && !token.contains('"')
-                        && !token.contains('[')
-                        && !token.contains('(')
-                    {
-                        subcommands.push(token.trim_end_matches(',').to_string());
+                    if token.len() > 1 && !token.contains(['<', '"', '[', '(']) {
+                        subs.push(token.trim_end_matches(',').to_string());
                     }
                 }
             }
         }
-
-        // Remove duplicates and sort
-        subcommands.sort();
-        subcommands.dedup();
-        subcommands
-    }
-
-    /// Get subcommands for a command (uses cache when possible)
-    fn get_subcommands(&mut self, cmd: &str) -> Vec<String> {
-        // Try to load from cache first
-        let mut subcommands = self.load_subcommands(cmd);
-        
-        // Extract fresh subcommands if cache is empty
-        if subcommands.is_empty() {
-            subcommands = self.extract_subcommands(cmd);
-            if !subcommands.is_empty() {
-                self.save_subcommands(cmd, &subcommands).ok();
-                self.subcommand_cache.insert(cmd.to_string(), subcommands.clone());
-            }
-        }
-        
-        subcommands
+        subs.sort();
+        subs.dedup();
+        subs
     }
 
     /// Handle file/directory completions
