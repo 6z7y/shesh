@@ -6,16 +6,35 @@ use std::process::{Command as StdCommand};
 
 /// Execute a command (built-in, symbol, or external)
 pub fn execute_command(cmd: &str, args: &[String]) -> Result<(), String> {
-    // First handle special commands
-    match cmd {
-        // Then handle other built-ins
-        "cd" => core::cd(args),
+    // First, construct the full input string from cmd and args
+    // Example: if cmd = "g" and args = ["status"], input = "g status"
+    let input = if args.is_empty() {
+        cmd.to_string()
+    } else {
+        format!("{} {}", cmd, args.join(" "))
+    };
+
+    // Expand aliases: e.g., if alias g="git", input becomes "git status"
+    let expanded_input = core::expand_aliases(&input);
+
+    // Split the expanded input into new command and arguments
+    let mut parts = expanded_input.split_whitespace();
+    let new_cmd = match parts.next() {
+        Some(c) => c,
+        None => return Ok(()), // No command to execute
+    };
+    let new_args: Vec<String> = parts.map(|s| s.to_string()).collect();
+    let alias_args: Vec<&str> = new_args.iter().map(|s| s.as_str()).collect();
+
+
+    // Match and execute built-in, symbol, or external command
+    match new_cmd {
+        "alias" => core::handle_alias_cmd(&alias_args),
+        "cd" => core::cd(&new_args),
         "exit" => std::process::exit(0),
         "help" => core::help(),
-        // Then handle symbols
-        ">" | ">>" | "<" | "|" => handle_symbol(cmd, args),
-        // Finally handle external commands
-        _ => execute_external_command(cmd, args),
+        ">" | ">>" | "<" | "|" => handle_symbol(new_cmd, &new_args),
+        _ => execute_external_command(new_cmd, &new_args),
     }
 }
 
@@ -31,7 +50,6 @@ fn handle_symbol(symbol: &str, args: &[String]) -> Result<(), String> {
 /// Handle redirection symbols
 fn handle_redirection(_symbol: &str, _args: &[String]) -> Result<(), String> {
     // Implementation for redirection handling
-    // ... (نفس الكود السابق مع تعديلات طفيفة)
     Err("Redirection not implemented".to_string())
 }
 
