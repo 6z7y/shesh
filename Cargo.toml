@@ -1,7 +1,10 @@
 [package]
 name = "shesh"
 version = "0.0.4"
+description = "a simple shell for your terminal"
 edition = "2024"
+license = "GPL-3.0"
+repository = "https://github.com/6z7y/shesh-rs"
 
 [dependencies]
 anyhow = "1.0.98"
