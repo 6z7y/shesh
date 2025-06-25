@@ -1,8 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::{BufReader, BufWriter, BufRead, Write};
-use std::path::PathBuf;
-use std::process::Command;
+use std::{
+    collections::{HashMap, HashSet},
+    fs::{self, OpenOptions},
+    io::{BufReader, BufWriter, BufRead, Write},
+    path::PathBuf,
+    process::Command
+};
 use reedline::{Completer, Suggestion, Span};
 use dirs;
 
@@ -51,10 +53,10 @@ impl MyCompleter {
         }
 
         // Add built-in commands
-        commands.insert("cd".to_string());
-        commands.insert("exit".to_string());
-        commands.insert("help".to_string());
-
+        let builtins = ["cd","exit","help"];
+        let _b = for b in builtins {
+            commands.insert(b.to_string());
+        };
         commands
     }
 
@@ -65,31 +67,44 @@ impl MyCompleter {
 
     /// Load cache for a command from disk
     fn load_subcommands(&mut self, cmd: &str) -> Vec<String> {
-        // Check in-memory cache first
-        if let Some(subcommands) = self.subcommand_cache.get(cmd) {
-            return subcommands.clone();
-        }
-
-        // Load from disk if not in memory
         let cache_file = self.get_cache_path(cmd);
-        if let Ok(file) = OpenOptions::new().read(true).open(&cache_file) {
-            let subcommands: Vec<String> = BufReader::new(file)
-                .lines()
-                .filter_map(|line| line.ok())
-                .collect();
-            
+
+        if cache_file.exists() {
+            if let Ok(file) = OpenOptions::new().read(true).open(&cache_file) {
+                let reader = BufReader::new(file);
+                let subcommands: Vec<String> = reader
+                    .lines()
+                    .filter_map(Result::ok)
+                    .filter(|line| !line.trim().is_empty())
+                    .collect();
+
+                if !subcommands.is_empty() {
+                    self.subcommand_cache.insert(cmd.to_string(), subcommands.clone());
+                    return subcommands;
+                }
+            }
+        } else {
+            let subcommands = self.extract_subcommands(cmd);
             if !subcommands.is_empty() {
+                let _ = self.save_subcommands(cmd, &subcommands);
                 self.subcommand_cache.insert(cmd.to_string(), subcommands.clone());
                 return subcommands;
             }
         }
-        
+
         Vec::new()
     }
+
 
     /// Save command cache to disk
     fn save_subcommands(&self, cmd: &str, subcommands: &[String]) -> Result<(), std::io::Error> {
         let cache_file = self.get_cache_path(cmd);
+
+        // make file if not found
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
         let file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -112,18 +127,18 @@ impl MyCompleter {
 
         let help_text = String::from_utf8_lossy(&output.stdout);
         let mut subcommands: Vec<String> = Vec::new();
-        
+
         for line in help_text.lines() {
-            if line.starts_with("  ") && !line.starts_with("  -") {
-                if let Some(subcmd) = line.split_whitespace().next() {
+            if line.starts_with("  ") /* && !line.starts_with("  -") */ {
+                if let Some(token) = line.split_whitespace().next() {
                     // Filter out invalid subcommands
-                    if !subcmd.starts_with('-') 
-                        && subcmd != cmd 
-                        && subcmd.len() > 1 
-                        && !subcmd.contains('[') 
-                        && !subcmd.contains('(') 
+                    if token.len() > 1
+                        && !token.contains('<')
+                        && !token.contains('"')
+                        && !token.contains('[')
+                        && !token.contains('(')
                     {
-                        subcommands.push(subcmd.to_string());
+                        subcommands.push(token.trim_end_matches(',').to_string());
                     }
                 }
             }
