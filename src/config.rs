@@ -5,6 +5,7 @@ use std::{
     path::PathBuf
 };
 
+use home::home_dir;
 use crate::shell;
 
 pub struct Config {
@@ -23,13 +24,20 @@ impl Config {
 
 // config
 
+// fn get_home_dir() -> PathBuf {
+//     env::var_os("HOME")
+//         .map(PathBuf::from)
+//         .unwrap_or_else(|| {
+//             eprintln!("Warning: HOME not set, using current directory");
+//             env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+//         })
+// }
+
 fn get_home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Warning: HOME not set, using current directory");
-            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        })
+    home_dir().unwrap_or_else(|| {
+        eprintln!("Warning: HOME not set, using current directory");
+        env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    })
 }
 
 fn get_config_path() -> PathBuf {
@@ -101,16 +109,9 @@ fn load_config(path: &PathBuf) -> Config {
 
 pub fn run_startup(config: &Config) {
     for cmd_line in &config.startup {
-        let parts = shell::parse_input(cmd_line).unwrap_or_default();
-        if let Some((cmd, args)) = parts.split_first() {
-            // Combine command and arguments into a single string for shell::execute
-            let full_cmd = if args.is_empty() {
-                cmd.clone()
-            } else {
-                format!("{} {}", cmd, args.join(" "))
-            };
-            
-            if let Err(e) = shell::execute(&full_cmd) {
+        let tokens = shell::parse_input(cmd_line).unwrap_or_default();
+        if !tokens.is_empty() {
+            if let Err(e) = crate::commands::execute_command(&tokens) {
                 eprintln!("Startup command failed: {}", e);
             }
         }
@@ -119,12 +120,18 @@ pub fn run_startup(config: &Config) {
 
 //-----------------------
 //history
+// pub fn history_file_path() -> PathBuf {
+//     std::env::var("HOME")
+//         .map(PathBuf::from)
+//         .unwrap_or_else(|_| PathBuf::from("."))
+//         .join(".local/share/shesh")
+//         .join("history")
+// }
+
 pub fn history_file_path() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".local/share/shesh")
-        .join("history")
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local/share/shesh/history")
 }
 
 // Append a command to the history file and return it if valid

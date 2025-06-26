@@ -8,7 +8,18 @@ mod validator;
 
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal
+    default_emacs_keybindings,
+    ColumnarMenu,
+    DefaultHinter,
+    Emacs,
+    FileBackedHistory,
+    KeyCode,
+    KeyModifiers,
+    MenuBuilder,
+    Reedline,
+    ReedlineEvent,
+    ReedlineMenu,
+    Signal
 };
 
 use crate::{
@@ -70,7 +81,7 @@ fn main() {
         .with_validator(validator)
         .with_hinter(Box::new(
             DefaultHinter::default()
-                .with_style(Style::new().italic().fg(Color::LightGray))
+                .with_style(Style::new().italic().fg(Color::Rgb(120, 120, 120)))
                 .with_min_chars(1)
         ));
 

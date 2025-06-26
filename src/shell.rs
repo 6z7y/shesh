@@ -1,7 +1,6 @@
 //! Core shell execution logic
-
-use crate::commands::execute_command;
 use crate::utils::expand;
+use crate::commands;
 
 /// Execute a shell command
 pub fn execute(input: &str) -> Result<(), String> {
@@ -9,19 +8,10 @@ pub fn execute(input: &str) -> Result<(), String> {
     let tokens = parse_input(input)?;
     
     // 2. Expand tokens
-    let expanded = expand_tokens(&tokens)?;
+    let expanded_tokens = expand_tokens(&tokens)?;
     
-    // 3. Split into command and arguments
-    let (command, arguments) = split_command(&expanded)?;
-    
-    // 4. Execute the command
-    execute_command(command, arguments)
-}
-
-/// Parse input string into tokens
-pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
-    shell_words::split(input)
-        .map_err(|e| format!("Parse error: {}", e))
+    // 3. Execute the command with tokens
+    commands::execute_command(&expanded_tokens)
 }
 
 /// Expand variables and special symbols in tokens
@@ -38,9 +28,30 @@ fn expand_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
         .collect()
 }
 
-/// Split tokens into command and arguments
-fn split_command(tokens: &[String]) -> Result<(&str, &[String]), String> {
-    tokens.split_first()
-        .map(|(cmd, args)| (cmd.as_str(), args))
-        .ok_or_else(|| "Empty command after expansion".to_string())
+// pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
+//     shell_words::split(input)
+//         .map_err(|e| format!("Parse error: {}", e))
+// }
+
+pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
+    // Split input while preserving quoted strings
+    shell_words::split(input)
+        .map_err(|e| format!("Parse error: {}", e))
+        .and_then(|tokens| {
+            // Handle multi-character operators (&&)
+            let mut result = Vec::new();
+            for token in tokens {
+                if token == "&" {
+                    // Check if previous token is also '&'
+                    if let Some(prev) = result.last_mut() {
+                        if prev == "&" {
+                            *prev = "&&".to_string();
+                            continue;
+                        }
+                    }
+                }
+                result.push(token);
+            }
+            Ok(result)
+        })
 }

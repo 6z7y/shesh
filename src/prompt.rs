@@ -22,16 +22,39 @@ impl Prompt for SimplePrompt {
             return prompt.clone();
         }
 
-        // Get current dir and replace $HOME with ~
-        let path = env::current_dir()
-            .ok()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "no path".to_string());
-
+        let path = env::current_dir().ok().map(|p| p.display().to_string()).unwrap_or("no path".into());
         let homedir = env::var("HOME").unwrap_or_default();
         let new_path = path.replace(&homedir, "~");
 
-        Cow::Owned(format!("{}> ", new_path))
+        let segments: Vec<&str> = new_path.split('/').filter(|s| !s.is_empty()).collect();
+        let len = segments.len();
+
+        if len == 0 {
+            return if new_path.starts_with('/') {
+                Cow::Borrowed("/> ")
+            } else {
+                Cow::Borrowed("> ")
+            };
+        }
+
+        let start = if new_path.starts_with('/') { "/" } else { "" };
+        
+        let shortened = segments
+            .iter()
+            .enumerate()
+            .map(|(i, seg)| {
+                if i == len - 1 {
+                    seg.to_string()
+                } else if seg.starts_with('.') {
+                    format!(".{}", seg.chars().nth(1).unwrap_or_default())
+                } else {
+                    seg.chars().next().unwrap_or_default().to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+
+        Cow::Owned(format!("{}{}> ", start, shortened))
     }
 
     fn render_prompt_right(&self) -> Cow<'static, str> {
@@ -50,4 +73,3 @@ impl Prompt for SimplePrompt {
         Cow::Borrowed("⭠ ")
     }
 }
-

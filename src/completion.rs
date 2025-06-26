@@ -6,7 +6,7 @@ use std::{
     process::Command
 };
 use reedline::{Completer, Suggestion, Span};
-use dirs;
+use home::home_dir;
 
 /// Main completer struct that handles command completions
 pub struct MyCompleter {
@@ -21,9 +21,13 @@ pub struct MyCompleter {
 impl MyCompleter {
     /// Initialize a new completer with default settings
     pub fn new() -> Self {
-        let cache_dir = dirs::cache_dir()
-            .expect("Failed to get cache directory")
-            .join("shesh/completions");
+        let cache_dir = home_dir()
+            .map(|mut path| {
+                path.push(".cache");
+                path.push("shesh/completions");
+                path
+            })
+                .unwrap_or_else(|| PathBuf::from("/tmp/shesh/completions"));
         
         // Create cache directory if it doesn't exist
         fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
@@ -54,7 +58,7 @@ impl MyCompleter {
 
         // Add built-in commands
         let builtins = ["cd","exit","help"];
-        let _b = for b in builtins {
+        for b in builtins {
             commands.insert(b.to_string());
         };
         commands
@@ -114,7 +118,7 @@ impl MyCompleter {
 
         let subcommands: Vec<String> = reader
             .lines()
-            .filter_map(Result::ok)
+            .map_while(Result::ok)
             .filter(|line| !line.trim().is_empty())
             .collect();
 
@@ -260,9 +264,17 @@ impl Completer for MyCompleter {
 }
 
 /// Expand paths starting with tilde to home directory
+// fn expand_tilde(path: &str) -> PathBuf {
+//     if let Some(stripped) = path.strip_prefix('~') {
+//         if let Some(home) = dirs::home_dir() {
+//             return home.join(stripped.trim_start_matches('/'));
+//         }
+//     }
+//     PathBuf::from(path)
+// }
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(stripped) = path.strip_prefix('~') {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = home_dir() {
             return home.join(stripped.trim_start_matches('/'));
         }
     }
