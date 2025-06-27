@@ -1,51 +1,70 @@
+
 # shesh
 
-**shesh** is a lightweight shell written in Rust — fast, simple, and minimal.
+**shesh** is a simple shell — fast, light, smooth.
 
-## Why shesh?
+---
 
-- Quick startup and low memory usage  
-- Built with Rust: safe, reliable, and fast  
+##  Why shesh?
+
+- A lightweight version of [fish shell](https://fishshell.com/)
+- Built from scratch in Rust
+- Supports auto-completion and command hints
 - Clean configuration with simple syntax
 
 ---
 
-## Building
+##  Installation
 
-Requirements: [Rust](https://rustup.rs/)
+### From source
+
+**Requirements**: [Rust](https://rustup.rs/)
 
 ```bash
 git clone https://github.com/6z7y/shesh-rs.git
 cd shesh-rs
 make clean install
 ```
-For run:
+
+### Using Cargo
+
+```bash
+cargo install shesh
+```
+
+---
+
+##  Running shesh
+
+To start the shell, just run:
+
 ```bash
 shesh
 ```
 
 ---
 
-## Configuration
+##  Configuration
 
-Config file location:
+**Config file location:**
 
 ```
 ~/.config/shesh/shesh.24
 ```
 
-Example configuration:
+### Example configuration:
 
-```
-prompt = "shesh> "
+```ini
+#prompt = "shesh> "
 #startup
 echo "shesh ready!"
 ```
 
 ---
 
-## Message from shesh
-> "Hi! I'm shesh - your simple shell companion.  
-> I focus on being lightweight and fast.  
-> I'm still under development, but I'm here and ready to help!"
+##  Message from shesh
+
+> Hey, I'm shesh — a small and fast shell written in Rust.  
+> I like to keep things simple — no clutter, just what you need.  
+> I'm still improving, but I'm stable and ready to run by your side.
 
