@@ -1,4 +1,4 @@
-mod core;
+pub mod core;
 mod symbols;
 
 use self::core::*;
@@ -26,10 +26,13 @@ pub fn execute_command(tokens: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
+    let expanded_tokens = symbols::expand_tokens(&expanded_tokens);
+
     // Execute built-in or external command
     match expanded_tokens[0].as_str() {
         "alias" => handle_alias_cmd(&expanded_tokens[1..]),
         "cd" => cd(&expanded_tokens[1..]),
+        "export" => handle_export_cmd(&expanded_tokens[1..]),
         "exit" => std::process::exit(0),
         "help" => help(),
         cmd => execute_external_command(cmd, &expanded_tokens[1..]),

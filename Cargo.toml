@@ -1,13 +1,12 @@
 [package]
 name = "shesh"
-version = "1.0.0"
+version = "1.0.1"
 description = "a simple shell for your terminal"
 edition = "2024"
 license = "GPL-3.0"
 repository = "https://github.com/6z7y/shesh-rs"
 
 [dependencies]
-home = "0.5.11"
 libc = "0.2.174"
 nu-ansi-term = "0.50.1"
 os_pipe = "1.2.2"

@@ -28,16 +28,11 @@ fn expand_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
         .collect()
 }
 
-// pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
-//     shell_words::split(input)
-//         .map_err(|e| format!("Parse error: {}", e))
-// }
-
 pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
     // Split input while preserving quoted strings
     shell_words::split(input)
         .map_err(|e| format!("Parse error: {}", e))
-        .and_then(|tokens| {
+        .map(|tokens| {
             // Handle multi-character operators (&&)
             let mut result = Vec::new();
             for token in tokens {
@@ -52,6 +47,7 @@ pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
                 }
                 result.push(token);
             }
-            Ok(result)
-        })
+            result
+        }
+    )
 }

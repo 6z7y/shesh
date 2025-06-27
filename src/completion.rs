@@ -1,12 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
+    env,
     fs::{self, OpenOptions},
-    io::{BufReader, BufWriter, BufRead, Write},
+    io::{BufRead, BufReader, BufWriter, Write},
     path::PathBuf,
     process::Command
 };
 use reedline::{Completer, Suggestion, Span};
-use home::home_dir;
+use crate::utils::expand_tilde;
 
 /// Main completer struct that handles command completions
 pub struct MyCompleter {
@@ -21,13 +22,8 @@ pub struct MyCompleter {
 impl MyCompleter {
     /// Initialize a new completer with default settings
     pub fn new() -> Self {
-        let cache_dir = home_dir()
-            .map(|mut path| {
-                path.push(".cache");
-                path.push("shesh/completions");
-                path
-            })
-                .unwrap_or_else(|| PathBuf::from("/tmp/shesh/completions"));
+        let cache_dir = PathBuf::from(env::var("HOME").unwrap())
+            .join(".cache/shesh/completions");
         
         // Create cache directory if it doesn't exist
         fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
@@ -43,21 +39,17 @@ impl MyCompleter {
     pub fn load_commands() -> HashSet<String> {
         let mut commands = HashSet::new();
 
-        // Load commands from system PATH
-        if let Some(path_var) = std::env::var_os("PATH") {
-            for path in std::env::split_paths(&path_var) {
-                if let Ok(entries) = std::fs::read_dir(path) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        if let Some(file_name) = entry.file_name().to_str().map(|s| s.to_string()) {
-                            commands.insert(file_name);
-                        }
-                    }
-                }
-            }
+        if let Some(path_var) = env::var_os("PATH") {
+            env::split_paths(&path_var)
+                .flat_map(|dir| fs::read_dir(dir).ok().into_iter().flatten())
+                .filter_map(|entry| entry.ok().and_then(|e| e.file_name().to_str().map(str::to_string)))
+                .for_each(|cmd| {
+                    commands.insert(cmd);
+                });
         }
 
         // Add built-in commands
-        let builtins = ["cd","exit","help"];
+        let builtins = ["alias","cd","exit","help"];
         for b in builtins {
             commands.insert(b.to_string());
         };
@@ -123,10 +115,10 @@ impl MyCompleter {
             .collect();
 
         if subcommands.is_empty() {
-            return None;
+            None
+        } else {
+            Some(subcommands)
         }
-
-        Some(subcommands)
     }
 
     /// Extract subcommands by parsing `cmd --help`
@@ -153,60 +145,56 @@ impl MyCompleter {
         subs
     }
 
-    /// Handle file/directory completions
-    fn complete_files(&self, current_word: &str, span: Span) -> Vec<Suggestion> {
-        // Find the last slash to determine base directory and partial filename
-        let last_slash = current_word.rfind('/').map(|i| i + 1).unwrap_or(0);
-        let (base_str, partial) = current_word.split_at(last_slash);
-        
-        // Expand tilde in base directory
-        let expanded_base = if base_str.starts_with('~') {
-            expand_tilde(base_str)
+    /// Handle file/directory completions without using `match`
+    fn complete_files(&self, current: &str, span: Span) -> Vec<Suggestion> {
+        let last_slash = current.rfind('/').map_or(0, |i| i + 1);
+        let (base, partial) = current.split_at(last_slash);
+
+        let expanded_base = if base.is_empty() {
+            PathBuf::from(".")
         } else {
-            PathBuf::from(base_str)
+            expand_tilde(base).unwrap_or_else(|_| PathBuf::from(base))
         };
-        
-        // Skip if base is not a directory
+
         if !expanded_base.is_dir() {
             return Vec::new();
         }
-        
-        // Read directory and generate suggestions
-        match std::fs::read_dir(&expanded_base) {
-            Ok(entries) => {
-                let mut suggestions = Vec::new();
-                let partial_span = Span::new(span.start + last_slash, span.end);
+
+        let partial_span = Span::new(span.start + last_slash, span.end);
+
+        let reader = match fs::read_dir(&expanded_base) {
+            Ok(rd) => rd,
+            Err(_) => return Vec::new(),
+        };
+
+        reader
+            .flatten()
+            .filter_map(|entry| {
+                // Fix: Create a binding for file_name
+                let file_name = entry.file_name();
+                let name = file_name.to_str()?;
                 
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if let Some(file_name) = entry.file_name().to_str().map(|s| s.to_string()) {
-                        // Skip hidden files unless explicitly requested
-                        if !partial.starts_with('.') && file_name.starts_with('.') {
-                            continue;
-                        }
-                        
-                        if file_name.starts_with(partial) {
-                            let is_dir = entry.path().is_dir();
-                            let mut value = file_name.clone();
-                            
-                            if is_dir {
-                                value.push('/');
-                            }
-                            
-                            suggestions.push(Suggestion {
-                                value,
-                                description: None,
-                                extra: None,
-                                span: partial_span,
-                                append_whitespace: false,
-                                style: None,
-                            });
-                        }
-                    }
+                if !partial.starts_with('.') && name.starts_with('.') {
+                    return None;
                 }
-                suggestions
-            }
-            Err(_) => Vec::new(),
-        }
+                
+                if !name.starts_with(partial) {
+                    return None;
+                }
+
+                let value = if entry.path().is_dir() {
+                    format!("{}/", name)
+                } else {
+                    name.to_string()
+                };
+                
+                Some(Suggestion {
+                    value,
+                    span: partial_span,
+                    ..Default::default()
+                })
+            })
+        .collect()
     }
 }
 
@@ -261,24 +249,6 @@ impl Completer for MyCompleter {
         // Otherwise, complete files in current directory
         self.complete_files(current_word, span)
     }
-}
-
-/// Expand paths starting with tilde to home directory
-// fn expand_tilde(path: &str) -> PathBuf {
-//     if let Some(stripped) = path.strip_prefix('~') {
-//         if let Some(home) = dirs::home_dir() {
-//             return home.join(stripped.trim_start_matches('/'));
-//         }
-//     }
-//     PathBuf::from(path)
-// }
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix('~') {
-        if let Some(home) = home_dir() {
-            return home.join(stripped.trim_start_matches('/'));
-        }
-    }
-    PathBuf::from(path)
 }
 
 /// Create sanitized filename for cache

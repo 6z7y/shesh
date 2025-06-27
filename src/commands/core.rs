@@ -1,7 +1,14 @@
+use std::env;
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::collections::HashMap;use crate::utils::expand;
 
+use crate::utils::{expand, expand_tilde};
+
+// Alias storage
 static ALIASES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+// Environment variables storage
+static ENV_VARS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
 pub fn set_alias(name: &str, cmd: &str) {
     let aliases = ALIASES.get_or_init(|| Mutex::new(HashMap::new()));
@@ -30,7 +37,7 @@ pub fn expand_aliases(input: &str) -> String {
 
         if let Some(alias_cmd) = lookup_alias(parts[0]) {
             let new_cmd = if parts.len() > 1 {
-                // استبدال المعاملات ($1, $2, ...)
+                // Replace parameters ($1, $2, ...)
                 let mut expanded = alias_cmd.clone();
                 for (i, arg) in parts[1].split_whitespace().enumerate() {
                     let param = format!("${}", i + 1);
@@ -63,7 +70,7 @@ pub fn handle_alias_cmd(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
-    // التعديل: استخدام join مباشرة على Vec<String>
+    // Join arguments into a single string
     let full = args.join(" ");
     let (name, value) = if let Some(eq_pos) = full.find('=') {
         let name = full[..eq_pos].trim();
@@ -89,14 +96,34 @@ pub fn cd(args: &[String]) -> Result<(), String> {
     let path = args.first().map(|s| s.as_str()).unwrap_or("~");
     let expanded = expand(path)?;
     
-    std::env::set_current_dir(&expanded)
+    // Use the new expand_tilde function
+    let expanded_path = expand_tilde(&expanded)?;
+
+    std::env::set_current_dir(&expanded_path)
         .map_err(|e| format!("cd: {}", e))?;
     
     Ok(())
 }
 
 pub fn execute_external_command(cmd: &str, args: &[String]) -> Result<(), String> {
-    let status = std::process::Command::new(cmd)
+    let mut command = std::process::Command::new(cmd);
+    
+    // 1. Get system environment variables
+    let mut env_vars: HashMap<String, String> = env::vars().collect();
+    
+    // 2. Add custom variables from ENV_VARS
+    if let Some(custom_vars) = ENV_VARS.get() {
+        let map = custom_vars.lock().unwrap();
+        for (key, value) in map.iter() {
+            env_vars.insert(key.clone(), value.clone());
+        }
+    }
+    
+    // 3. Set all environment variables for the command
+    command.envs(env_vars);
+    
+    // 4. Execute the command with arguments
+    let status = command
         .args(args)
         .status()
         .map_err(|e| match e.kind() {
@@ -112,6 +139,65 @@ pub fn execute_external_command(cmd: &str, args: &[String]) -> Result<(), String
             status.code().unwrap_or(-1)
         ))
     }
+}
+
+pub fn get_env_var(name: &str) -> Option<String> {
+    // Try system environment first
+    if let Ok(value) = env::var(name) {
+        return Some(value);
+    }
+    
+    // Try custom storage
+    ENV_VARS.get().and_then(|env_vars| {
+        let map = env_vars.lock().unwrap();
+        map.get(name).cloned()
+    })
+}
+
+/// Handle export command
+pub fn handle_export_cmd(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        // Display all environment variables (system + custom)
+        let mut all_vars: HashMap<String, String> = env::vars().collect();
+        
+        // Add custom variables
+        if let Some(env_vars) = ENV_VARS.get() {
+            let map = env_vars.lock().unwrap();
+            for (key, value) in map.iter() {
+                all_vars.insert(key.clone(), value.clone());
+            }
+        }
+        
+        // Find max key length for formatting
+        let max_key_len = all_vars.keys().map(|k| k.len()).max().unwrap_or(0);
+        let mut vars: Vec<_> = all_vars.into_iter().collect();
+        vars.sort_by(|a, b| a.0.cmp(&b.0));
+        
+        // Print formatted output
+        for (key, value) in vars {
+            println!("{:<width$} {}", key, value, width = max_key_len);
+        }
+    } else {
+        // Process arguments without holding lock
+        let mut new_vars = Vec::new();
+        for arg in args {
+            if let Some(pos) = arg.find('=') {
+                let name = arg[..pos].to_string();
+                let value = arg[pos + 1..].to_string();
+                new_vars.push((name, value));
+            } else {
+                return Err(format!("Invalid export syntax: {}", arg));
+            }
+        }
+        
+        // Update storage with new variables
+        let env_vars = ENV_VARS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut map = env_vars.lock().unwrap();
+        for (name, value) in new_vars {
+            map.insert(name, value);
+        }
+    }
+    Ok(())
 }
 
 /// Display help information

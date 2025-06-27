@@ -5,7 +5,6 @@ use std::{
     path::PathBuf
 };
 
-use home::home_dir;
 use crate::shell;
 
 pub struct Config {
@@ -23,20 +22,12 @@ impl Config {
 }
 
 // config
-
-// fn get_home_dir() -> PathBuf {
-//     env::var_os("HOME")
-//         .map(PathBuf::from)
-//         .unwrap_or_else(|| {
-//             eprintln!("Warning: HOME not set, using current directory");
-//             env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-//         })
-// }
-
 fn get_home_dir() -> PathBuf {
-    home_dir().unwrap_or_else(|| {
-        eprintln!("Warning: HOME not set, using current directory");
-        env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            eprintln!("Warning: HOME not set, using current directory");
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     })
 }
 
@@ -49,7 +40,6 @@ fn ensure_config_dirs(config_path: &std::path::Path) {
         let _ = std::fs::create_dir_all(parent);
     }
 }
-
 
 fn create_default_config(config_path: &PathBuf) {
     let default_content = "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"";
@@ -66,7 +56,6 @@ pub fn init() -> Config {
     
     load_config(&config_path)
 }
-
 
 fn load_config(path: &PathBuf) -> Config {
     let mut config = Config::default();
@@ -120,18 +109,12 @@ pub fn run_startup(config: &Config) {
 
 //-----------------------
 //history
-// pub fn history_file_path() -> PathBuf {
-//     std::env::var("HOME")
-//         .map(PathBuf::from)
-//         .unwrap_or_else(|_| PathBuf::from("."))
-//         .join(".local/share/shesh")
-//         .join("history")
-// }
-
 pub fn history_file_path() -> PathBuf {
-    home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".local/share/shesh/history")
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".local/share/shesh")
+        .join("history")
 }
 
 // Append a command to the history file and return it if valid
@@ -145,7 +128,6 @@ pub fn append_to_history(command: &str) {
             return;
         }
     } 
-
     match OpenOptions::new()
         .create(true)
         .append(true)
