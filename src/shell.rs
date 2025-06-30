@@ -1,4 +1,3 @@
-//! Core shell execution logic
 use crate::utils::expand;
 use crate::commands;
 
@@ -29,25 +28,64 @@ fn expand_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
 }
 
 pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
-    // Split input while preserving quoted strings
-    shell_words::split(input)
-        .map_err(|e| format!("Parse error: {}", e))
-        .map(|tokens| {
-            // Handle multi-character operators (&&)
-            let mut result = Vec::new();
-            for token in tokens {
-                if token == "&" {
-                    // Check if previous token is also '&'
-                    if let Some(prev) = result.last_mut() {
-                        if prev == "&" {
-                            *prev = "&&".to_string();
-                            continue;
+    let tokens = shell_words::split(input)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    let mut result = Vec::new();
+    for token in tokens {
+        let mut temp = Vec::new();
+        let mut current = String::new();
+        let mut chars = token.chars().peekable();
+        
+        while let Some(c) = chars.next() {
+            // Handle combined symbols like 2>&1
+            if c == '2' && chars.peek() == Some(&'>') {
+                chars.next(); // Skip '>'
+                if chars.peek() == Some(&'&') {
+                    chars.next(); // Skip '&'
+                    if chars.peek() == Some(&'1') {
+                        chars.next(); // Skip '1'
+                        if !current.is_empty() {
+                            temp.push(current);
+                            current = String::new();
                         }
+                        temp.push("2>&1".to_string());
+                        continue;
+                    } else {
+                        if !current.is_empty() {
+                            temp.push(current);
+                            current = String::new();
+                        }
+                        temp.push("2>".to_string());
+                        continue;
                     }
+                } else {
+                    if !current.is_empty() {
+                        temp.push(current);
+                        current = String::new();
+                    }
+                    temp.push("2>".to_string());
+                    continue;
                 }
-                result.push(token);
             }
-            result
+            
+            if ";|&<>".contains(c) {
+                if !current.is_empty() {
+                    temp.push(current);
+                    current = String::new();
+                }
+                temp.push(c.to_string());
+            } else {
+                current.push(c);
+            }
         }
-    )
+        
+        if !current.is_empty() {
+            temp.push(current);
+        }
+        
+        result.extend(temp);
+    }
+    
+    Ok(result)
 }

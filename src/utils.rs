@@ -2,16 +2,13 @@ use crate::commands::core::get_env_var;
 use std::path::PathBuf;
 
 pub fn expand_tilde(path: &str) -> Result<PathBuf, String> {
-    if path.starts_with('~') {
-        if let Some(rest) = path.strip_prefix('~') {
-            if let Some(home) = get_env_var("HOME") {
-                Ok(PathBuf::from(home).join(rest.trim_start_matches('/')))
-            } else {
-                Err("HOME environment variable not set".into())
-            }
-        } else {
-            Ok(PathBuf::from(path))
-        }
+    if let Some(home) = std::env::home_dir() {
+        let home_str = home.to_string_lossy().into_owned();
+        let expanded = path.replace('~', &home_str);
+        Ok(PathBuf::from(expanded))
+    } else if let Some(home) = get_env_var("HOME") {
+        let expanded = path.replace('~', &home);
+        Ok(PathBuf::from(expanded))
     } else {
         Ok(PathBuf::from(path))
     }

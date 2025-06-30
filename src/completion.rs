@@ -11,21 +11,16 @@ use crate::utils::expand_tilde;
 
 /// Main completer struct that handles command completions
 pub struct MyCompleter {
-    /// All available commands (builtins + PATH commands)
     commands: HashSet<String>,
-    /// Directory to store completion cache files
     cache_dir: PathBuf,
-    /// In-memory cache for subcommands
     subcommand_cache: HashMap<String, Vec<String>>,
 }
 
 impl MyCompleter {
-    /// Initialize a new completer with default settings
     pub fn new() -> Self {
         let cache_dir = PathBuf::from(env::var("HOME").unwrap())
             .join(".cache/shesh/completions");
         
-        // Create cache directory if it doesn't exist
         fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
 
         Self {
@@ -35,7 +30,6 @@ impl MyCompleter {
         }
     }
 
-    /// Load all available commands from PATH and builtins
     pub fn load_commands() -> HashSet<String> {
         let mut commands = HashSet::new();
 
@@ -48,7 +42,6 @@ impl MyCompleter {
                 });
         }
 
-        // Add built-in commands
         let builtins = ["alias","cd","exit","help"];
         for b in builtins {
             commands.insert(b.to_string());
@@ -56,12 +49,10 @@ impl MyCompleter {
         commands
     }
 
-    /// Get path to cache file for a command
     fn get_cache_path(&self, cmd: &str) -> PathBuf {
         self.cache_dir.join(format!("{}.24", sanitize_filename(cmd)))
     }
 
-    /// Get subcommands for a command, using cache when available
     fn get_subcommands(&mut self, cmd: &str) -> Vec<String> {
         if let Some(cached) = self.load_from_cache(cmd) {
             return cached;
@@ -76,7 +67,6 @@ impl MyCompleter {
         subcommands
     }
 
-    /// Save subcommands to cache file
     fn save_to_cache(&self, cmd: &str, subcommands: &[String]) -> Result<(), std::io::Error> {
         let path = self.get_cache_path(cmd);
 
@@ -98,7 +88,6 @@ impl MyCompleter {
         Ok(())
     }
 
-    /// Try to load cached subcommands from disk
     fn load_from_cache(&self, cmd: &str) -> Option<Vec<String>> {
         let cache_file = self.get_cache_path(cmd);
         if !cache_file.exists() {
@@ -121,7 +110,6 @@ impl MyCompleter {
         }
     }
 
-    /// Extract subcommands by parsing `cmd --help`
     fn extract_subcommands(&self, cmd: &str) -> Vec<String> {
         let output = match Command::new(cmd).arg("--help").output().ok() {
             Some(output) => output,
@@ -145,7 +133,7 @@ impl MyCompleter {
         subs
     }
 
-    /// Handle file/directory completions without using `match`
+    /// Handle file/directory completions
     fn complete_files(&self, current: &str, span: Span) -> Vec<Suggestion> {
         let last_slash = current.rfind('/').map_or(0, |i| i + 1);
         let (base, partial) = current.split_at(last_slash);
@@ -170,10 +158,10 @@ impl MyCompleter {
         reader
             .flatten()
             .filter_map(|entry| {
-                // Fix: Create a binding for file_name
                 let file_name = entry.file_name();
                 let name = file_name.to_str()?;
                 
+                // Skip hidden files unless explicitly requested
                 if !partial.starts_with('.') && name.starts_with('.') {
                     return None;
                 }
@@ -194,7 +182,7 @@ impl MyCompleter {
                     ..Default::default()
                 })
             })
-        .collect()
+            .collect()
     }
 }
 
@@ -203,7 +191,6 @@ impl Completer for MyCompleter {
         let line = &line[..pos];
         let parts: Vec<&str> = line.split_whitespace().collect();
 
-        // Calculate the current word and its span
         let last_space = line.rfind(' ').map(|i| i + 1).unwrap_or(0);
         let span = Span::new(last_space, pos);
         let current_word = &line[last_space..pos];
@@ -222,12 +209,12 @@ impl Completer for MyCompleter {
                 .collect();
         }
         
-        // Always complete files if path contains '/' or starts with '~'
+        // Complete files for paths
         if current_word.contains('/') || current_word.starts_with('~') {
             return self.complete_files(current_word, span);
         }
         
-        // For first token after command, try subcommands
+        // Complete subcommands for known commands
         if parts.len() == 1 {
             let main_cmd = parts[0];
             let subcommands = self.get_subcommands(main_cmd);
@@ -246,7 +233,7 @@ impl Completer for MyCompleter {
             }
         }
         
-        // Otherwise, complete files in current directory
+        // Default to file completion
         self.complete_files(current_word, span)
     }
 }

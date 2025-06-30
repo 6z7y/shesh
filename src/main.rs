@@ -6,20 +6,16 @@ mod prompt;
 mod utils;
 mod validator;
 
-use nu_ansi_term::{Color, Style};
-use reedline::{
-    default_emacs_keybindings,
-    ColumnarMenu,
-    DefaultHinter,
-    Emacs,
-    FileBackedHistory,
-    KeyCode,
-    KeyModifiers,
-    MenuBuilder,
-    Reedline,
-    ReedlineEvent,
-    ReedlineMenu,
-    Signal
+use {
+    nu_ansi_term::{Color, Style},
+    reedline::{
+        default_emacs_keybindings, ColumnarMenu,
+        DefaultHinter, Emacs,
+        FileBackedHistory, KeyCode,
+        KeyModifiers, MenuBuilder,
+        Reedline, ReedlineEvent,
+        ReedlineMenu, Signal
+    }
 };
 
 use crate::{
@@ -31,7 +27,6 @@ use crate::{
 fn main() {
     let config = config::init();
     config::run_startup(&config);
-
     let history_path = config::history_file_path();
     
     // Create history with file backing

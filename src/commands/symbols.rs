@@ -1,18 +1,19 @@
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use os_pipe::pipe;
-
+use std::process::{Stdio, Command};
+use crate::utils::expand_tilde;
 
 /// Represents different types of special symbols in shell commands
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SymbolType {
-    Pipe, // |
-    RedirectOut, // >
-    RedirectAppend, // >>
-    RedirectIn, // <
-    Background, // &
-    AndAnd, // &&
-    Semicolon // ;
+    Pipe,             // |
+    RedirectOut,      // >
+    RedirectAppend,   // >>
+    RedirectIn,       // <
+    RedirectErr,      // 2>
+    RedirectErrMerge, // 2>&1
+    Background,       // &
+    AndAnd,           // &&
+    Semicolon         // ;
 }
 
 impl SymbolType {
@@ -23,6 +24,8 @@ impl SymbolType {
             ">" => Some(Self::RedirectOut),
             ">>" => Some(Self::RedirectAppend),
             "<" => Some(Self::RedirectIn),
+            "2>" => Some(Self::RedirectErr),
+            "2>&1" => Some(Self::RedirectErrMerge),
             "&" => Some(Self::Background),
             "&&" => Some(Self::AndAnd),
             ";" => Some(Self::Semicolon),
@@ -33,40 +36,62 @@ impl SymbolType {
 
 /// Handle all special symbols in a command
 pub fn handle_symbols(tokens: &[String]) -> Result<(), String> {
-    // Find the first special symbol in the tokens
-    let symbol_pos = tokens.iter().enumerate().find_map(|(i, token)| {
-        SymbolType::from_str(token).map(|sym| (i, sym))
-    });
+    let mut symbol_positions = Vec::new();
+    let mut i = 0;
+    
+    while i < tokens.len() {
+        if let Some(sym) = SymbolType::from_str(&tokens[i]) {
+            symbol_positions.push((i, sym));
+        }
+        i += 1;
+    }
 
-    match symbol_pos {
-        Some((pos, symbol)) => match symbol {
-            SymbolType::Pipe => handle_pipe(&tokens[..pos], &tokens[pos+1..]),
-            SymbolType::RedirectOut | SymbolType::RedirectAppend | SymbolType::RedirectIn => {
-                if tokens.len() <= pos + 1 {
-                    return Err("Missing file argument".into());
-                }
-                handle_redirection(
-                    match symbol {
-                        SymbolType::RedirectOut => ">",
-                        SymbolType::RedirectAppend => ">>",
-                        SymbolType::RedirectIn => "<",
-                        _ => unreachable!()
-                    },
-                    &tokens[..pos],
-                    &tokens[pos+1]
-                )
+    if symbol_positions.is_empty() {
+        return Err("No special symbol found".into());
+    }
+
+    let (pos, symbol) = symbol_positions[0];
+    match symbol {
+        SymbolType::Pipe => handle_pipe(&tokens[..pos], &tokens[pos+1..]),
+        SymbolType::RedirectOut | SymbolType::RedirectAppend | SymbolType::RedirectIn | SymbolType::RedirectErr => {
+            if tokens.len() <= pos + 1 {
+                return Err("Missing file argument".into());
             }
-            SymbolType::Background => {
-                // Background symbol must be at the end
-                if pos != tokens.len() - 1 {
-                    return Err("Background symbol must be at the end".into());
-                }
-                handle_background(&tokens[..pos])
+            handle_redirection(
+                match symbol {
+                    SymbolType::RedirectOut => ">",
+                    SymbolType::RedirectAppend => ">>",
+                    SymbolType::RedirectIn => "<",
+                    SymbolType::RedirectErr => "2>",
+                    _ => unreachable!()
+                },
+                &tokens[..pos],
+                &tokens[pos+1]
+            )?;
+            
+            if tokens.len() > pos + 2 {
+                handle_symbols(&tokens[pos+2..])
+            } else {
+                Ok(())
             }
-            SymbolType::AndAnd => handle_and_and(&tokens[..pos], &tokens[pos+1..]),
-            SymbolType::Semicolon => handle_semicolon(&tokens[..pos], &tokens[pos+1..]),
-        },
-        None => Err("No special symbol found".into()),
+        }
+        SymbolType::RedirectErrMerge => {
+            handle_redirection("2>&1", &tokens[..pos], "")?;
+            
+            if tokens.len() > pos + 1 {
+                handle_symbols(&tokens[pos+1..])
+            } else {
+                Ok(())
+            }
+        }
+        SymbolType::Background => {
+            if pos != tokens.len() - 1 {
+                return Err("Background symbol must be at the end".into());
+            }
+            handle_background(&tokens[..pos])
+        }
+        SymbolType::AndAnd => handle_and_and(&tokens[..pos], &tokens[pos+1..]),
+        SymbolType::Semicolon => handle_semicolon(&tokens[..pos], &tokens[pos+1..]),
     }
 }
 
@@ -169,17 +194,43 @@ pub fn expand_braces(input: &str) -> Vec<String> {
 
 /// Expand both braces and wildcards in tokens
 pub fn expand_tokens(tokens: &[String]) -> Vec<String> {
-    tokens
-        .iter()
-        .flat_map(|token| {
-            // First expand braces
-            let brace_expanded = expand_braces(token);
+    let mut new_tokens = Vec::new();
+    
+    for token in tokens {
+        // Separate attached symbols
+        let mut temp = Vec::new();
+        let mut current = String::new();
+        
+        for c in token.chars() {
+            if ";|&<>".contains(c) {
+                if !current.is_empty() {
+                    temp.push(current);
+                    current = String::new();
+                }
+                temp.push(c.to_string());
+            } else {
+                current.push(c);
+            }
+        }
+        
+        if !current.is_empty() {
+            temp.push(current);
+        }
+        
+        // Expand braces and wildcards for each token
+        for t in temp {
+            // Apply tilde expansion and convert to string
+            let expanded_str = expand_tilde(&t)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or(t);
             
-            // Then expand wildcards for each brace-expanded token
-            brace_expanded.into_iter()
-                .flat_map(|t| expand_wildcard(&t))
-        })
-        .collect()
+            let brace_expanded = expand_braces(&expanded_str);
+            for b in brace_expanded {
+                new_tokens.extend(expand_wildcard(&b));
+            }
+        }
+    }
+    new_tokens
 }
 
 /// Check if filename matches a wildcard pattern
@@ -222,123 +273,164 @@ pub fn handle_redirection(symbol: &str, cmd_tokens: &[String], file_name: &str) 
         return Err("Missing command".into());
     }
 
-    // Expand wildcards in command tokens (not filename)
-    let expanded_tokens: Vec<String> = cmd_tokens
-        .iter()
-        .flat_map(|token| expand_wildcard(token))
-        .collect();
+    let expanded_tokens = expand_tokens(cmd_tokens);
+    let expanded_file = expand_tilde(file_name)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| file_name.to_string());
 
     match symbol {
         ">" => {
-            let mut file = File::create(file_name)
-                .map_err(|e| format!("Error creating file: {}", e))?;
-            
-            let output = std::process::Command::new(&expanded_tokens[0])
+            let file = File::create(&expanded_file).map_err(|e| e.to_string())?;
+            let mut child = Command::new(&expanded_tokens[0])
                 .args(&expanded_tokens[1..])
-                .output()
-                .map_err(|e| format!("Command failed: {}", e))?;
+                .stdout(Stdio::from(file))
+                .spawn()
+                .map_err(|e| e.to_string())?;
             
-            if !output.status.success() {
-                return Err(format!(
-                    "Command failed with code {}",
-                    output.status.code().unwrap_or(-1)
-                ));
-            }
-            
-            file.write_all(&output.stdout)
-                .map_err(|e| format!("Error writing to file: {}", e))
+            child.wait().map_err(|e| e.to_string())?;
+            Ok(())
         }
         ">>" => {
-            let mut file = OpenOptions::new()
+            let file = OpenOptions::new()
                 .append(true)
                 .create(true)
-                .open(file_name)
-                .map_err(|e| format!("Error opening file: {}", e))?;
+                .open(&expanded_file)
+                .map_err(|e| e.to_string())?;
             
-            let output = std::process::Command::new(&expanded_tokens[0])
+            let mut child = Command::new(&expanded_tokens[0])
                 .args(&expanded_tokens[1..])
-                .output()
-                .map_err(|e| format!("Command failed: {}", e))?;
+                .stdout(Stdio::from(file))
+                .spawn()
+                .map_err(|e| e.to_string())?;
             
-            if !output.status.success() {
-                return Err(format!(
-                    "Command failed with code {}",
-                    output.status.code().unwrap_or(-1)
-                ));
-            }
-            
-            file.write_all(&output.stdout)
-                .map_err(|e| format!("Error writing to file: {}", e))
+            child.wait().map_err(|e| e.to_string())?;
+            Ok(())
         }
         "<" => {
-            let mut file = File::open(file_name)
-                .map_err(|e| format!("Error opening file: {}", e))?;
-            let mut contents = String::new();
-            file.read_to_string(&mut contents)
-                .map_err(|e| format!("Error reading file: {}", e))?;
-            
-            let status = std::process::Command::new(&expanded_tokens[0])
+            let file = File::open(&expanded_file).map_err(|e| e.to_string())?;
+            let mut child = Command::new(&expanded_tokens[0])
                 .args(&expanded_tokens[1..])
-                .stdin(std::process::Stdio::piped())
+                .stdin(Stdio::from(file))
                 .spawn()
-                .map_err(|e| format!("Failed to start command: {}", e))?
-                .wait()
-                .map_err(|e| format!("Command failed: {}", e))?;
+                .map_err(|e| e.to_string())?;
+            
+            let status = child.wait().map_err(|e| e.to_string())?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
+            }
+        }
+        "2>" => {
+            let file = File::create(&expanded_file).map_err(|e| e.to_string())?;
+            let mut child = Command::new(&expanded_tokens[0])
+                .args(&expanded_tokens[1..])
+                .stderr(Stdio::from(file))
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            
+            let status = child.wait().map_err(|e| e.to_string())?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
+            }
+        }
+        "2>&1" => {
+            let mut child = Command::new(&expanded_tokens[0])
+                .args(&expanded_tokens[1..])
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+
+            let status = child.wait().map_err(|e| e.to_string())?;
             
             if status.success() {
                 Ok(())
             } else {
-                Err(format!(
-                    "Command failed with code {}",
-                    status.code().unwrap_or(-1)
-                ))
+                Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
             }
-        }
-        _ => Err("Unknown redirection symbol".into()),
+        },
+        _ => Err(format!("Unknown redirection symbol: {}", symbol)),
     }
 }
 
 /// Handle pipe symbol
 pub fn handle_pipe(left_cmd: &[String], right_cmd: &[String]) -> Result<(), String> {
-    if left_cmd.is_empty() || right_cmd.is_empty() {
+    // Collect all commands in the pipeline
+    let mut commands = vec![left_cmd.to_vec()];
+    let mut current = Vec::new();
+    
+    // Split right_cmd into individual commands
+    for token in right_cmd {
+        if token == "|" {
+            commands.push(current);
+            current = Vec::new();
+        } else {
+            current.push(token.clone());
+        }
+    }
+    commands.push(current);
+
+    // Validate command count
+    if commands.len() < 2 {
         return Err("Both sides of pipe must contain commands".into());
     }
 
-    let expanded_left = expand_tokens(left_cmd);
-    let expanded_right = expand_tokens(right_cmd);
+    let mut children = vec![];
+    let mut prev_stdout = None;
 
-    let (reader, writer) = pipe().map_err(|e| e.to_string())?;
+    for (i, cmd_tokens) in commands.iter().enumerate() {
+        // Expand tokens for this command
+        let expanded_tokens = expand_tokens(cmd_tokens);
+        if expanded_tokens.is_empty() {
+            return Err("Empty command in pipeline".into());
+        }
 
-    let mut child1 = std::process::Command::new(&expanded_left[0])
-        .args(&expanded_left[1..])
-        .stdout(writer)
-        .spawn()
-        .map_err(|e| format!("First command failed: {}", e))?;
+        let mut command = Command::new(&expanded_tokens[0]);
+        command.args(&expanded_tokens[1..]);
 
-    let mut child2 = std::process::Command::new(&expanded_right[0])
-        .args(&expanded_right[1..])
-        .stdin(reader)
-        .spawn()
-        .map_err(|e| format!("Second command failed: {}", e))?;
+        // Set stdin from previous command if available
+        if i > 0 {
+            command.stdin(prev_stdout.take().unwrap());
+        }
 
-    let status1 = child1.wait().map_err(|e| e.to_string())?;
-    let status2 = child2.wait().map_err(|e| e.to_string())?;
+        // Set stdout to pipe if not last command
+        if i < commands.len() - 1 {
+            command.stdout(Stdio::piped());
+        }
 
-    if !status1.success() {
-        return Err(format!(
-            "Left command failed with code {}",
-            status1.code().unwrap_or(-1)
-        ));
+        // Spawn the command
+        let mut child = command.spawn()
+            .map_err(|e| format!("Failed to spawn command '{}': {}", expanded_tokens[0], e))?;
+
+        // Capture stdout for next command
+        if i < commands.len() - 1 {
+            prev_stdout = child.stdout.take();
+        }
+
+        children.push(child);
     }
 
-    if !status2.success() {
-        return Err(format!(
-            "Right command failed with code {}",
-            status2.code().unwrap_or(-1)
-        ));
+    // Wait for all child processes to finish
+    let mut last_status = None;
+    for child in children.iter_mut().rev() {
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if last_status.is_none() {
+            last_status = Some(status);
+        }
     }
 
-    Ok(())
+    // Return based on last command's status
+    match last_status {
+        Some(status) if status.success() => Ok(()),
+        Some(status) => Err(format!(
+            "Pipeline failed with code {}",
+            status.code().unwrap_or(-1)
+        )), // Fixed: added closing parenthesis here
+        None => Ok(()),
+    }
 }
 
 /// Handle background execution
@@ -348,7 +440,6 @@ pub fn handle_background(cmd_tokens: &[String]) -> Result<(), String> {
     }
 
     let expanded_tokens = expand_tokens(cmd_tokens);
-
     let tokens = expanded_tokens.to_vec();
     
     std::thread::spawn(move || {

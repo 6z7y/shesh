@@ -1,94 +1,71 @@
 use std::{
-    env,
-    fs::{self, OpenOptions},
-    io::Write,
-    path::PathBuf
+    env,io::Write,
+    fs::{self, create_dir_all, OpenOptions},
+    path::{PathBuf, Path}
 };
 
-use crate::shell;
+use crate::{
+    shell
+};
 
 pub struct Config {
     pub prompt: Option<String>,
     pub startup: Vec<String>,
 }
 
-impl Config {
+impl Default for Config {
     fn default() -> Self {
         Self {
             prompt: Some("#shesh> ".to_string()),
-            startup: Vec::new(),
+            startup: vec![],
         }
     }
 }
 
-// config
-fn get_home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Warning: HOME not set, using current directory");
-            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    })
-}
+//config file
+pub fn init()->Config{
+    let config_path = config_file_path();
 
-fn get_config_path() -> PathBuf {
-    get_home_dir().join(".config/shesh/shesh.24")
-}
-
-fn ensure_config_dirs(config_path: &std::path::Path) {
     if let Some(parent) = config_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = create_dir_all(parent);
     }
-}
 
-fn create_default_config(config_path: &PathBuf) {
-    let default_content = "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"";
-    let _ = fs::write(config_path, default_content);
-}
-
-pub fn init() -> Config {
-    let config_path = get_config_path();
-    ensure_config_dirs(&config_path);
-    
     if !config_path.exists() {
-        create_default_config(&config_path);
+        let default = "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"";
+        let _ = fs::write(&config_path, default);
     }
-    
     load_config(&config_path)
 }
 
-fn load_config(path: &PathBuf) -> Config {
-    let mut config = Config::default();
-    
-    let Ok(content) = fs::read_to_string(path) else {
-        return config;
-    };
+pub fn config_file_path() -> PathBuf {
+    PathBuf::from(env::var("HOME").unwrap())
+        .join(".config/shesh/shesh.24")
+}
 
+pub fn load_config(path:&Path)->Config{
+    let content = fs::read_to_string(path).unwrap_or_default();
+    parse_config(&content)
+}
+
+fn parse_config(content: &str) -> Config {
+    let mut config = Config::default();
     let mut in_startup = false;
-    
-    for line in content.lines() {
-        let trimmed = line.trim();
-        
-        if trimmed.is_empty() {
-            continue;
-        }
-        
-        if let Some(comment) = trimmed.strip_prefix('#') {
-            let commented_line = comment.trim();
-            if commented_line.starts_with("prompt") {
-                // Prompt is commented out - use default
+
+    for line in content.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if let Some(comment) = line.strip_prefix('#') {
+            let comment = comment.trim();
+            if comment.starts_with("prompt") {
                 config.prompt = None;
-            } else if commented_line.eq_ignore_ascii_case("startup") {
+            } else if comment.eq_ignore_ascii_case("startup") {
                 in_startup = true;
             }
             continue;
         }
-        
+
         if in_startup {
-            config.startup.push(trimmed.to_string());
-        } else if let Some((key, value)) = trimmed.split_once('=') {
+            config.startup.push(line.to_string());
+        } else if let Some((key, value)) = line.split_once('=') {
             if key.trim() == "prompt" {
-                // Prompt is not commented out - use custom prompt
                 config.prompt = Some(value.trim().trim_matches('"').to_string());
             }
         }
@@ -101,43 +78,30 @@ pub fn run_startup(config: &Config) {
         let tokens = shell::parse_input(cmd_line).unwrap_or_default();
         if !tokens.is_empty() {
             if let Err(e) = crate::commands::execute_command(&tokens) {
-                eprintln!("Startup command failed: {}", e);
+                eprintln!("[X] Startup failed: {}", e);
             }
         }
     }
 }
 
-//-----------------------
-//history
+//history file
 pub fn history_file_path() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".local/share/shesh")
-        .join("history")
+    PathBuf::from(env::var("HOME").unwrap())
+        .join(".local/share/shesh/history")
 }
 
-// Append a command to the history file and return it if valid
 pub fn append_to_history(command: &str) {
     let path = history_file_path();
 
-   // Create parent directories if needed
     if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            eprintln!("Failed to create directory: {}", e);
-            return;
-        }
+        let _ = create_dir_all(parent);
     } 
-    match OpenOptions::new()
+
+    if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
     {
-        Ok(mut file) => {
-            if let Err(e) = writeln!(file, "{}", command) {
-                eprintln!("Failed to write to history: {}", e);
-            }
-        }
-        Err(e) => eprintln!("Failed to open history file: {}", e),
+        let _ = writeln!(file, "{}", command);
     }
 }

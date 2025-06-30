@@ -1,5 +1,7 @@
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
 use std::{borrow::Cow, env};
+
+use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
+use crate::utils::expand;
 
 pub struct SimplePrompt {
     custom_prompt: Option<Cow<'static, str>>,
@@ -19,7 +21,10 @@ impl SimplePrompt {
 impl Prompt for SimplePrompt {
     fn render_prompt_left(&self) -> Cow<'static, str> {
         if let Some(ref prompt) = self.custom_prompt {
-            return prompt.clone();
+            return match expand(prompt) {
+                Ok(expanded) => Cow::Owned(expanded),
+                Err(_) => prompt.clone(),
+            };
         }
 
         let path = env::current_dir().ok().map(|p| p.display().to_string()).unwrap_or("no path".into());
@@ -54,7 +59,7 @@ impl Prompt for SimplePrompt {
             .collect::<Vec<_>>()
             .join("/");
 
-        Cow::Owned(format!("{}{}> ", start, shortened))
+        Cow::Owned(format!("{start}{shortened}> ")) // عدل هنا حسب تحذير clippy
     }
 
     fn render_prompt_right(&self) -> Cow<'static, str> {

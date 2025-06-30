@@ -1,8 +1,10 @@
-use std::env;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::{
+    env,
+    collections::HashMap,
+    sync::{Mutex, OnceLock}
+};
 
-use crate::utils::{expand, expand_tilde};
+use crate::utils::{expand_tilde};
 
 // Alias storage
 static ALIASES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
@@ -94,10 +96,8 @@ pub fn handle_alias_cmd(args: &[String]) -> Result<(), String> {
 /// Change current working directory
 pub fn cd(args: &[String]) -> Result<(), String> {
     let path = args.first().map(|s| s.as_str()).unwrap_or("~");
-    let expanded = expand(path)?;
     
-    // Use the new expand_tilde function
-    let expanded_path = expand_tilde(&expanded)?;
+    let expanded_path = expand_tilde(path)?;
 
     std::env::set_current_dir(&expanded_path)
         .map_err(|e| format!("cd: {}", e))?;
