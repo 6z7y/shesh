@@ -1,21 +1,24 @@
-pub mod core;
-mod symbols;
+use crate::b_core::{
+    expand_aliases, handle_alias_cmd, cd, handle_export_cmd,
+    help, execute_external_command, handle_24_command
+};
+use crate::b_symbols::{handle_symbols, expand_tokens};
 
-use self::core::*;
-use self::symbols::*;
-
-/// Execute a command with support for special symbols
 pub fn execute_command(tokens: &[String]) -> Result<(), String> {
     if tokens.is_empty() {
         return Ok(());
     }
 
-    // Try to handle special symbols first
+    // معالجة أمر 24> أولاً قبل أي توسيع
+    if tokens[0] == "24>" {
+        return handle_24_command(&tokens[1..]);
+    }
+
+    // معالجة الرموز الخاصة
     if let Ok(()) = handle_symbols(tokens) {
         return Ok(());
     }
 
-    // No special symbols found, process as regular command
     let input_str = tokens.join(" ");
     let expanded = expand_aliases(&input_str);
     let expanded_tokens = expanded.split_whitespace()
@@ -26,9 +29,8 @@ pub fn execute_command(tokens: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
-    let expanded_tokens = symbols::expand_tokens(&expanded_tokens);
+    let expanded_tokens = expand_tokens(&expanded_tokens);
 
-    // Execute built-in or external command
     match expanded_tokens[0].as_str() {
         "alias" => handle_alias_cmd(&expanded_tokens[1..]),
         "cd" => cd(&expanded_tokens[1..]),

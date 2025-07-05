@@ -1,25 +1,19 @@
 use crate::utils::expand;
-use crate::commands;
+use crate::b_mod; // تحديث المسار
 
-/// Execute a shell command
 pub fn execute(input: &str) -> Result<(), String> {
-    // 1. Parse input
     let tokens = parse_input(input)?;
-    
-    // 2. Expand tokens
     let expanded_tokens = expand_tokens(&tokens)?;
-    
-    // 3. Execute the command with tokens
-    commands::execute_command(&expanded_tokens)
+    b_mod::execute_command(&expanded_tokens) // تحديث المسار
 }
 
-/// Expand variables and special symbols in tokens
 fn expand_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
     tokens.iter()
         .map(|token| {
-            // Expand tokens while preserving quoted strings
             if token.starts_with('"') && token.ends_with('"') {
-                Ok(token.clone())
+                expand(&token[1..token.len()-1])
+            } else if token.starts_with('\'') && token.ends_with('\'') {
+                Ok(token[1..token.len()-1].to_string())
             } else {
                 expand(token)
             }
@@ -28,60 +22,119 @@ fn expand_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
 }
 
 pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
-    let tokens = shell_words::split(input)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut quote_char = '\0';
+    let mut escape_next = false;
+    
+    for c in input.chars() {
+        match c {
+            '\\' if !escape_next => escape_next = true,
+            '"' | '\'' if !escape_next => {
+                if !in_quotes {
+                    in_quotes = true;
+                    quote_char = c;
+                } else if c == quote_char {
+                    in_quotes = false;
+                } else {
+                    current.push(c);
+                }
+            }
+            ' ' | '\t' if !in_quotes && !escape_next => {
+                if !current.is_empty() {
+                    tokens.push(current);
+                    current = String::new();
+                }
+            }
+            _ => {
+                if escape_next {
+                    current.push('\\');
+                }
+                current.push(c);
+                escape_next = false;
+            }
+        }
+    }
+    
+    if !current.is_empty() {
+        tokens.push(current);
+    }
     
     let mut result = Vec::new();
     for token in tokens {
         let mut temp = Vec::new();
-        let mut current = String::new();
+        let mut current_part = String::new();
         let mut chars = token.chars().peekable();
         
         while let Some(c) = chars.next() {
-            // Handle combined symbols like 2>&1
-            if c == '2' && chars.peek() == Some(&'>') {
-                chars.next(); // Skip '>'
-                if chars.peek() == Some(&'&') {
-                    chars.next(); // Skip '&'
-                    if chars.peek() == Some(&'1') {
-                        chars.next(); // Skip '1'
-                        if !current.is_empty() {
-                            temp.push(current);
-                            current = String::new();
-                        }
-                        temp.push("2>&1".to_string());
-                        continue;
-                    } else {
-                        if !current.is_empty() {
-                            temp.push(current);
-                            current = String::new();
-                        }
-                        temp.push("2>".to_string());
-                        continue;
+            // Handle 24> as a single token
+            if c == '2' && chars.peek() == Some(&'4') {
+                chars.next(); // Skip '4'
+                if chars.peek() == Some(&'>') {
+                    chars.next(); // Skip '>'
+                    if !current_part.is_empty() {
+                        temp.push(current_part);
+                        current_part = String::new();
                     }
+                    temp.push("24>".to_string());
+                    continue;
                 } else {
-                    if !current.is_empty() {
-                        temp.push(current);
-                        current = String::new();
+                    current_part.push('2');
+                    current_part.push('4');
+                    if let Some('>') = chars.peek() {
+                        chars.next();
+                        current_part.push('>');
                     }
-                    temp.push("2>".to_string());
+                }
+            }
+            
+            // Handle other symbols
+            if c == '>' {
+                let mut symbol = c.to_string();
+                if let Some('>') = chars.peek() {
+                    symbol.push(chars.next().unwrap());
+                }
+                
+                if !current_part.is_empty() {
+                    temp.push(current_part);
+                    current_part = String::new();
+                }
+                temp.push(symbol);
+                continue;
+            }
+            
+            if c == '1' || c == '2' || c == '&' {
+                if let Some('>') = chars.peek() {
+                    let mut symbol = c.to_string();
+                    symbol.push(chars.next().unwrap());
+                    
+                    if let Some('>') = chars.peek() {
+                        symbol.push(chars.next().unwrap());
+                    }
+                    
+                    if !current_part.is_empty() {
+                        temp.push(current_part);
+                        current_part = String::new();
+                    }
+                    temp.push(symbol);
                     continue;
                 }
             }
             
-            if ";|&<>".contains(c) {
-                if !current.is_empty() {
-                    temp.push(current);
-                    current = String::new();
+            if ";|&<".contains(c) {
+                if !current_part.is_empty() {
+                    temp.push(current_part);
+                    current_part = String::new();
                 }
                 temp.push(c.to_string());
             } else {
-                current.push(c);
+                current_part.push(c);
             }
         }
         
-        if !current.is_empty() {
-            temp.push(current);
+        if !current_part.is_empty() {
+            temp.push(current_part);
         }
         
         result.extend(temp);

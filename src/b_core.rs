@@ -4,7 +4,7 @@ use std::{
     sync::{Mutex, OnceLock}
 };
 
-use crate::utils::{expand_tilde};
+use crate::utils::{expand_tilde, toggle_vim_mode}; // أضف toggle_vim_mode هنا
 
 // Alias storage
 static ALIASES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
@@ -213,4 +213,23 @@ pub fn help() -> Result<(), String> {
     println!("  < file         - Redirect input from file");
     println!("  cmd1 | cmd2    - Pipe output of cmd1 to input of cmd2");
     Ok(())
+}
+
+pub fn handle_24_command(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        // بدون وسائط، عرض المساعدة
+        println!("24> commands:");
+        println!("  vim_keys - Toggle Vim keybindings mode");
+        return Ok(());
+    }
+
+    match args[0].as_str() {
+        "vim_keys" => {
+            let enabled = toggle_vim_mode();
+            println!("Vim keybinds {}",
+                if enabled { "enabled" } else { "disabled" });
+            Ok(())
+        }
+        _ => Err("Invalid 24> command".into()),
+    }
 }

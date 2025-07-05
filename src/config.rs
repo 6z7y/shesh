@@ -5,8 +5,9 @@ use std::{
 };
 
 use crate::{
-    shell
+    shell,
 };
+
 
 pub struct Config {
     pub prompt: Option<String>,
@@ -77,8 +78,8 @@ pub fn run_startup(config: &Config) {
     for cmd_line in &config.startup {
         let tokens = shell::parse_input(cmd_line).unwrap_or_default();
         if !tokens.is_empty() {
-            if let Err(e) = crate::commands::execute_command(&tokens) {
-                eprintln!("[X] Startup failed: {}", e);
+            if let Err(e) = crate::b_mod::execute_command(&tokens) { // تحديث المسار
+                eprintln!("[X] Startup failed: {e}");
             }
         }
     }
@@ -102,6 +103,6 @@ pub fn append_to_history(command: &str) {
         .append(true)
         .open(&path)
     {
-        let _ = writeln!(file, "{}", command);
+        let _ = writeln!(file, "{command}");
     }
 }

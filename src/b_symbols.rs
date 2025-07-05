@@ -1,6 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::process::{Stdio, Command};
 use crate::utils::expand_tilde;
+use crate::b_mod::execute_command;
 
 /// Represents different types of special symbols in shell commands
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -10,22 +11,27 @@ pub enum SymbolType {
     RedirectAppend,   // >>
     RedirectIn,       // <
     RedirectErr,      // 2>
-    RedirectErrMerge, // 2>&1
+    RedirectErrAppend,// 2>>
+    RedirectAll,      // &>
+    RedirectAllAppend,// &>>
     Background,       // &
     AndAnd,           // &&
-    Semicolon         // ;
+    Semicolon,        // ;
 }
 
 impl SymbolType {
-    /// Convert a token string to SymbolType
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "|" => Some(Self::Pipe),
             ">" => Some(Self::RedirectOut),
             ">>" => Some(Self::RedirectAppend),
             "<" => Some(Self::RedirectIn),
+            "1>" => Some(Self::RedirectOut),
+            "1>>" => Some(Self::RedirectAppend),
             "2>" => Some(Self::RedirectErr),
-            "2>&1" => Some(Self::RedirectErrMerge),
+            "2>>" => Some(Self::RedirectErrAppend),
+            "&>" => Some(Self::RedirectAll),
+            "&>>" => Some(Self::RedirectAllAppend),
             "&" => Some(Self::Background),
             "&&" => Some(Self::AndAnd),
             ";" => Some(Self::Semicolon),
@@ -53,33 +59,24 @@ pub fn handle_symbols(tokens: &[String]) -> Result<(), String> {
     let (pos, symbol) = symbol_positions[0];
     match symbol {
         SymbolType::Pipe => handle_pipe(&tokens[..pos], &tokens[pos+1..]),
-        SymbolType::RedirectOut | SymbolType::RedirectAppend | SymbolType::RedirectIn | SymbolType::RedirectErr => {
+        SymbolType::RedirectOut | 
+        SymbolType::RedirectAppend | 
+        SymbolType::RedirectIn | 
+        SymbolType::RedirectErr | 
+        SymbolType::RedirectErrAppend | 
+        SymbolType::RedirectAll | 
+        SymbolType::RedirectAllAppend => {
             if tokens.len() <= pos + 1 {
                 return Err("Missing file argument".into());
             }
             handle_redirection(
-                match symbol {
-                    SymbolType::RedirectOut => ">",
-                    SymbolType::RedirectAppend => ">>",
-                    SymbolType::RedirectIn => "<",
-                    SymbolType::RedirectErr => "2>",
-                    _ => unreachable!()
-                },
+                symbol,
                 &tokens[..pos],
                 &tokens[pos+1]
             )?;
             
             if tokens.len() > pos + 2 {
                 handle_symbols(&tokens[pos+2..])
-            } else {
-                Ok(())
-            }
-        }
-        SymbolType::RedirectErrMerge => {
-            handle_redirection("2>&1", &tokens[..pos], "")?;
-            
-            if tokens.len() > pos + 1 {
-                handle_symbols(&tokens[pos+1..])
             } else {
                 Ok(())
             }
@@ -268,7 +265,11 @@ fn matches_pattern(pattern: &str, name: &str) -> bool {
 }
 
 /// Handle redirection symbols
-pub fn handle_redirection(symbol: &str, cmd_tokens: &[String], file_name: &str) -> Result<(), String> {
+pub fn handle_redirection(
+    symbol: SymbolType,
+    cmd_tokens: &[String],
+    file_name: &str
+) -> Result<(), String> {
     if cmd_tokens.is_empty() {
         return Err("Missing command".into());
     }
@@ -278,81 +279,61 @@ pub fn handle_redirection(symbol: &str, cmd_tokens: &[String], file_name: &str) 
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| file_name.to_string());
 
+    let mut command = Command::new(&expanded_tokens[0]);
+    command.args(&expanded_tokens[1..]);
+
     match symbol {
-        ">" => {
-            let file = File::create(&expanded_file).map_err(|e| e.to_string())?;
-            let mut child = Command::new(&expanded_tokens[0])
-                .args(&expanded_tokens[1..])
-                .stdout(Stdio::from(file))
-                .spawn()
+        SymbolType::RedirectOut => {
+            let file = File::create(&expanded_file)
                 .map_err(|e| e.to_string())?;
-            
-            child.wait().map_err(|e| e.to_string())?;
-            Ok(())
+            command.stdout(file);
         }
-        ">>" => {
+        SymbolType::RedirectAppend => {
             let file = OpenOptions::new()
                 .append(true)
                 .create(true)
                 .open(&expanded_file)
                 .map_err(|e| e.to_string())?;
-            
-            let mut child = Command::new(&expanded_tokens[0])
-                .args(&expanded_tokens[1..])
-                .stdout(Stdio::from(file))
-                .spawn()
-                .map_err(|e| e.to_string())?;
-            
-            child.wait().map_err(|e| e.to_string())?;
-            Ok(())
+            command.stdout(file);
         }
-        "<" => {
-            let file = File::open(&expanded_file).map_err(|e| e.to_string())?;
-            let mut child = Command::new(&expanded_tokens[0])
-                .args(&expanded_tokens[1..])
-                .stdin(Stdio::from(file))
-                .spawn()
+        SymbolType::RedirectErr => {
+            let file = File::create(&expanded_file)
                 .map_err(|e| e.to_string())?;
-            
-            let status = child.wait().map_err(|e| e.to_string())?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
-            }
+            command.stderr(file);
         }
-        "2>" => {
-            let file = File::create(&expanded_file).map_err(|e| e.to_string())?;
-            let mut child = Command::new(&expanded_tokens[0])
-                .args(&expanded_tokens[1..])
-                .stderr(Stdio::from(file))
-                .spawn()
+        SymbolType::RedirectErrAppend => {
+            let file = OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&expanded_file)
                 .map_err(|e| e.to_string())?;
-            
-            let status = child.wait().map_err(|e| e.to_string())?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
-            }
+            command.stderr(file);
         }
-        "2>&1" => {
-            let mut child = Command::new(&expanded_tokens[0])
-                .args(&expanded_tokens[1..])
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
+        SymbolType::RedirectAll => {
+            let file = File::create(&expanded_file)
                 .map_err(|e| e.to_string())?;
+            command.stdout(file.try_clone().map_err(|e| e.to_string())?);
+            command.stderr(file);
+        }
+        SymbolType::RedirectAllAppend => {
+            let file = OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&expanded_file)
+                .map_err(|e| e.to_string())?;
+            command.stdout(file.try_clone().map_err(|e| e.to_string())?);
+            command.stderr(file);
+        }
+        _ => return Err("Unsupported redirection".into()),
+    }
 
-            let status = child.wait().map_err(|e| e.to_string())?;
-            
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
-            }
-        },
-        _ => Err(format!("Unknown redirection symbol: {}", symbol)),
+    let status = command.status()
+        .map_err(|e| e.to_string())?;
+        
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Command failed with code {}", status.code().unwrap_or(-1)))
     }
 }
 
@@ -467,11 +448,11 @@ pub fn handle_background(cmd_tokens: &[String]) -> Result<(), String> {
 /// Handle && operator
 pub fn handle_and_and(left_cmd: &[String], right_cmd: &[String]) -> Result<(), String> {
     // Execute left command
-    let left_result = super::execute_command(left_cmd);
+    let left_result = execute_command(left_cmd);
     
     // Only execute right command if left succeeded
     if left_result.is_ok() {
-        super::execute_command(right_cmd)
+        execute_command(right_cmd)
     } else {
         left_result
     }
@@ -480,8 +461,8 @@ pub fn handle_and_and(left_cmd: &[String], right_cmd: &[String]) -> Result<(), S
 /// Handle ; operator
 pub fn handle_semicolon(left_cmd: &[String], right_cmd: &[String]) -> Result<(), String> {
     // Always execute left command
-    let _ = super::execute_command(left_cmd);
+    let _ = execute_command(left_cmd);
     
     // Always execute right command
-    super::execute_command(right_cmd)
+    execute_command(right_cmd)
 }
