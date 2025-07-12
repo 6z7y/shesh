@@ -21,8 +21,8 @@
 **Requirements**: [Rust](https://rustup.rs/)
 
 ```bash
-git clone https://github.com/6z7y/shesh-rs.git
-cd shesh-rs
+git clone https://github.com/6z7y/shesh.git
+cd shesh
 make clean install
 ```
 
