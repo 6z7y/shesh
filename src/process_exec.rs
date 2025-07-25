@@ -1,12 +1,21 @@
-use libc::{self, fork, pipe, dup2, close, STDIN_FILENO, STDOUT_FILENO, waitpid};
 use std::{
-    io,
+    io,ptr,
     ffi::CString,
     process::exit,
-    ptr
+    os::fd::{AsFd, AsRawFd}
 };
 
-use crate::parse::{ParsedCommand, Operator};
+use libc::{
+    fork,pipe,STDOUT_FILENO,
+    SIG_DFL,setsid,signal,
+    SIGTTIN,SIGINT,SIG_IGN,
+    SIGTTOU,SIGQUIT,STDIN_FILENO,
+    dup2,close,waitpid
+};
+use crate::{
+    parse::{ParsedCommand, Operator},
+    shell::run
+};
 
 /// Unified pipe and command execution
 pub fn run_pipe(commands: Vec<ParsedCommand>) -> io::Result<()> {
@@ -77,9 +86,8 @@ pub fn run_pipe(commands: Vec<ParsedCommand>) -> io::Result<()> {
     }
 
     if status != 0 {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("Command failed with status {}", status)
+        Err(io::Error::other(
+            format!("Command failed with status {status}")
         ))
     } else {
         Ok(())
@@ -96,4 +104,42 @@ pub fn flatten_pipes(commands: Vec<ParsedCommand>) -> Vec<ParsedCommand> {
         },
         other => vec![other],
     }).collect()
+}
+
+
+pub fn run_background(command: ParsedCommand) -> io::Result<()> {
+    let pid = unsafe { fork() };
+    match pid {
+        0 => { // Child process
+            unsafe { setsid(); }
+            
+            // Reset signal handlers
+            unsafe {
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+                signal(SIGTTOU, SIG_IGN);
+                signal(SIGTTIN, SIG_IGN);
+            }
+            
+            // Redirect standard I/O
+            let null = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/null")?;
+            
+            unsafe {
+                dup2(null.as_raw_fd(), 0);
+                dup2(null.as_raw_fd(), 1);
+                dup2(null.as_fd().as_raw_fd(), 2);
+            }
+            
+            let _ = run(command);
+            std::process::exit(0);
+        },
+        pid if pid > 0 => {
+            println!("[{}] Running in background", pid);
+            Ok(())
+        },
+        _ => Err(io::Error::last_os_error())
+    }
 }

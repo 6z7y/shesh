@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "shesh"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "libc",
  "nu-ansi-term",

@@ -1,10 +1,10 @@
-use std::ffi::CString;
 use std::{
     env,
     ptr,
     io,
+    ffi::CString,
 };
-use libc::{fork, execvp, waitpid};
+use libc::{dup2, fork, execvp, waitpid};
 
 use crate::{
     utils::expand_tilde
@@ -16,8 +16,17 @@ pub fn cd(args: &[&str]) -> io::Result<()> {
     
     env::set_current_dir(&path).map_err(|e| {
         let msg = format!("cd: {}: {}", path.display(), e);
-        io::Error::new(io::ErrorKind::Other, msg)
+        io::Error::other(msg)
     })
+}
+
+pub fn help()-> String {
+    "
+    Available builtins:
+    - cd [dir] : Change directory
+    - exit     : Exit the shell
+    - help     : Show this help
+    ".to_string()
 }
 
 pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
@@ -27,10 +36,13 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
     
     // Convert all arguments to CStrings
     let args_cstr: Vec<CString> = all_args
-        .map(|a| CString::new(a))
+        .map(|s| CString::new(s).map_err(|e| io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid argument: {}", e)
+        )))
         .collect::<Result<_, _>>()?;
     
-    // Build argv array (pointers + null terminator)
+    // Build argv array
     let argv: Vec<*const libc::c_char> = args_cstr
         .iter()
         .map(|c| c.as_ptr())
@@ -40,34 +52,44 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
     unsafe {
         match fork() {
             0 => { // Child process
+                libc::signal(libc::SIGINT, libc::SIG_DFL);
+                libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+
+                // Redirect stderr to stdout to capture command's own error messages
+                dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO);
+                
                 execvp(cmd_cstr.as_ptr(), argv.as_ptr());
-                libc::exit(1); // Only reached if execvp fails
+                // Only reached if execvp fails
+                libc::exit(127); // Standard "not found" exit code
             },
             -1 => Err(io::Error::last_os_error()), // Fork failed
             pid => { // Parent process
                 let mut status = 0;
-                // WNOHANG would return immediately if child hasn't exited
-                // We use 0 to wait (remove WNOHANG for blocking wait)
-                while waitpid(pid, &mut status, 0) > 0 {}
+                waitpid(pid, &mut status, 0);
                 
-                if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) != 0 {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Command failed with status {}", libc::WEXITSTATUS(status)))
-                    )
+                if libc::WIFEXITED(status) {
+                    match libc::WEXITSTATUS(status) {
+                        0 => Ok(()),
+                        127 => Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("'{}': isn't installed.", command)
+                        )),
+                        _ => Ok(()) // Ignore other exit codes (commands handle their own errors)
+                    }
                 } else {
+                    // Only report signals if they're not part of normal operation
+                    if libc::WIFSIGNALED(status) {
+                        let sig = libc::WTERMSIG(status);
+                        if sig != libc::SIGINT && sig != libc::SIGTERM {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                format!("Command terminated by signal {}", sig)
+                            ));
+                        }
+                    }
                     Ok(())
                 }
             }
         }
     }
-}
-
-pub fn help()-> String {
-    format!("
-Available builtins:
-- cd [dir] : Change directory
-- exit     : Exit the shell
-- help     : Show this help
-")
 }

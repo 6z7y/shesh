@@ -133,7 +133,7 @@ impl MyCompleter {
         subs
     }
 
-/// Handle file/directory completions
+    /// Handle file/directory completions
     fn complete_files(&self, current: &str, span: Span) -> Vec<Suggestion> {
         let last_slash = current.rfind('/').map_or(0, |i| i + 1);
         let (base, partial) = current.split_at(last_slash);
@@ -141,7 +141,7 @@ impl MyCompleter {
         let expanded_base = if base.is_empty() {
             PathBuf::from(".")
         } else {
-            expand_tilde(base) // Remove .into()
+            expand_tilde(base)
         };
 
         if !expanded_base.is_dir() {
@@ -170,10 +170,13 @@ impl MyCompleter {
                     return None;
                 }
 
+                // Escape spaces by adding backslash before them
+                let escaped_name = name.replace(' ', "\\ ");
+
                 let value = if entry.path().is_dir() {
-                    format!("{name}/")
+                    format!("{escaped_name}/")
                 } else {
-                    name.to_string()
+                    escaped_name.to_string()
                 };
                 
                 Some(Suggestion {

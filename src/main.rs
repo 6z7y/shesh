@@ -70,14 +70,16 @@ fn main() {
         .with_menu(menu)
         .with_hinter(Box::new(
             DefaultHinter::default()
-                .with_style(Style::new().italic().fg(Color::Rgb(120, 120, 120)))
+                .with_style(Style::new().underline().italic().fg(Color::Rgb(120, 120, 120)))
                 .with_min_chars(1),
         ))
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
 
     unsafe {
-        libc::signal(libc::SIGINT, libc::SIG_DFL); // quit from tools Ctrl+C
-        libc::signal(libc::SIGQUIT, libc::SIG_IGN); // ignore Ctrl+\
+        // تجاهل Ctrl+C في الشيل الرئيسي
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        // تجاهل Ctrl+\
+        libc::signal(libc::SIGQUIT, libc::SIG_IGN);
     }
 
     // [9] Main REPL loop
@@ -86,7 +88,7 @@ fn main() {
             Ok(Signal::Success(buf)) if !buf.trim().is_empty() => {
                 config::append_to_history(&buf);
                 if let Err(e) = shell::exec(&buf) {
-                    eprintln!("\x1b[31mError: {e}\x1b[0m");
+                    eprintln!("\x1b[31m- {e}\x1b[0m");
                 }
             }
             Ok(Signal::CtrlD) => break,

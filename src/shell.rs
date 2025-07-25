@@ -1,24 +1,23 @@
 use std::{
     io,
 };
-use libc::{fork};
 use crate::{
     parse::{parse_syntax,process_tokens,ParsedCommand,Operator},
     builtins::{cd,execute_external,help},
-    process_exec::{run_pipe,flatten_pipes}
+    process_exec::{run_pipe,flatten_pipes,run_background}
 };
 
 // Main execution entry point
 pub fn exec(cmd: &str) -> io::Result<()> {
     // Step 1: Parse input string into command structure
     let command = parse_syntax(cmd);
-    
+
     // Step 2: Execute the parsed command
-    run_command(command)
+    run(command)
 }
 
 // Executes commands based on their parsed structure
-fn run_command(cmd: ParsedCommand) -> io::Result<()> {
+pub fn run(cmd: ParsedCommand) -> io::Result<()> {
     match cmd {
         // Simple command case (e.g., "ls -l")
         ParsedCommand::Single(args) => {
@@ -52,14 +51,14 @@ fn run_command(cmd: ParsedCommand) -> io::Result<()> {
                 // Sequential execution (;)
                 Operator::Seq => {
                     // Execute left command, then right regardless of result
-                    run_command(*left)?;
-                    run_command(*right)
+                    run(*left)?;
+                    run(*right)
                 }
                 // Logical AND (&&)
                 Operator::And => {
                     // Only execute right if left succeeds
-                    if run_command(*left).is_ok() {
-                        run_command(*right)
+                    if run(*left).is_ok() {
+                        run(*right)
                     } else {
                         Ok(())
                     }
@@ -67,8 +66,8 @@ fn run_command(cmd: ParsedCommand) -> io::Result<()> {
                 // Logical OR (||)
                 Operator::Or => {
                     // Only execute right if left fails
-                    if run_command(*left).is_err() {
-                        run_command(*right)
+                    if run(*left).is_err() {
+                        run(*right)
                     } else {
                         Ok(())
                     }
@@ -77,27 +76,7 @@ fn run_command(cmd: ParsedCommand) -> io::Result<()> {
                     let commands = flatten_pipes(vec![*left, *right]);
                     run_pipe(commands)
                 }
-                Operator::Background => {
-                    let pid = unsafe { fork() };
-                    match pid {
-                        0 => { // Child process
-                            // Reset signal handlers in child
-                            unsafe {
-                                libc::signal(libc::SIGINT, libc::SIG_DFL);
-                                libc::signal(libc::SIGQUIT, libc::SIG_DFL);
-                            }
-                            let _ = run_command(*left); // Ignore result in background
-                            unsafe { libc::exit(0); } // <-- Add unsafe block here
-                        },
-                        pid if pid > 0 => {
-                            println!("Started in background (pid: {pid})");
-                            // Detach from child process
-                            unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN); }
-                            Ok(())
-                        },
-                        _ => Err(io::Error::last_os_error())
-                    }
-                }
+                Operator::Background => run_background(*left)
             }
         }
     }

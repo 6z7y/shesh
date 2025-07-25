@@ -1,7 +1,8 @@
 use std::{
     env,io::Write,
     fs::{self, create_dir_all, OpenOptions},
-    path::{PathBuf, Path}
+    path::{PathBuf, Path},
+    process::exit
 };
 
 pub struct Config {
@@ -18,13 +19,36 @@ impl Default for Config {
     }
 }
 
-//config file
-pub fn config_file_path() -> PathBuf {
-    PathBuf::from(env::var("HOME").unwrap())
-        .join(".config/shesh/shesh.24")
+pub fn get_home() -> PathBuf {
+    env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| {
+        eprintln!("can't find the home dir");
+        exit(1)
+    })
 }
 
-pub fn init()->Config{
+pub fn get_config() -> PathBuf {
+    env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| get_home().join(".config"))
+}
+
+// pub fn get_cache() -> PathBuf {
+//     env::var_os("XDG_CACHE_HOME")
+//         .map(PathBuf::from)
+//         .unwrap_or_else(|| get_home().join(".cache"))
+// }
+
+pub fn config_file_path() -> PathBuf {
+    get_config().join("shesh").join("shesh.24")
+}
+
+
+pub fn history_file_path() -> PathBuf {
+    get_home().join(".local/share/shesh/history")
+}
+
+//config file
+pub fn init() -> Config {
     let config_path = config_file_path();
 
     if let Some(parent) = config_path.parent() {
@@ -32,37 +56,47 @@ pub fn init()->Config{
     }
 
     if !config_path.exists() {
-        let default = "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"";
-        let _ = fs::write(&config_path, default);
+        fs::write(
+            &config_path,
+            "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"",
+        )
+        .unwrap_or_else(|_| {
+            eprintln!("Unable to create a config file");
+            exit(1)
+        });
     }
     load_config(&config_path)
 }
 
-pub fn load_config(path:&Path)->Config{
-    let content = fs::read_to_string(path).unwrap_or_default();
-    parse_config(&content)
+pub fn load_config(path: &Path) -> Config {
+    parse_config(&fs::read_to_string(path).unwrap_or_else(|_| {
+        eprintln!("Unable to load a config file");
+        exit(1)
+    }))
 }
 
 fn parse_config(content: &str) -> Config {
     let mut config = Config::default();
     let mut in_startup = false;
 
-    for line in content.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        if let Some(comment) = line.strip_prefix('#') {
-            let comment = comment.trim();
-            if comment.starts_with("prompt") {
-                config.prompt = None;
-            } else if comment.eq_ignore_ascii_case("startup") {
-                in_startup = true;
+    for linee in content.lines() {
+        let line = linee.trim();
+        if !line.is_empty() {
+            if let Some(stripped) = line.strip_prefix('#') {
+                match stripped.trim() {
+                    c if c.starts_with("prompt") => config.prompt = None,
+                    c if c.eq_ignore_ascii_case("startup") => in_startup = true,
+                    _ => {}
+                }
+                continue;
             }
-            continue;
-        }
 
-        if in_startup {
-            config.startup.push(line.to_string());
-        } else if let Some((key, value)) = line.split_once('=') {
-            if key.trim() == "prompt" {
-                config.prompt = Some(value.trim().trim_matches('"').to_string());
+            if in_startup {
+                config.startup.push(line.to_string());
+            } else if let Some((key, value)) = line.split_once('=') {
+                if key.trim() == "prompt" {
+                    config.prompt = Some(value.trim().trim_matches('"').to_string());
+                }
             }
         }
     }
@@ -80,25 +114,20 @@ pub fn run_startup(config: &Config) {
 }
 
 //history file
-pub fn history_file_path() -> PathBuf {
-    PathBuf::from(env::var("HOME").unwrap())
-        .join(".local/share/shesh/history")
-}
-
 pub fn append_to_history(command: &str) {
     let path = history_file_path();
 
-    if let Some(parent) = path.parent() {
-        if create_dir_all(parent).is_err() {
-            eprintln!("Failed to create directory: {}", parent.display());
-        }
+    if path.parent().map_or(false, |p| create_dir_all(p).is_err()) {
+        eprintln!("[X] Failed to create history directory");
+        return;
     }
 
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
-        if writeln!(file, "{command}").is_err() {
-            eprintln!("Failed to write to: {}", path.display());
+        if let Err(e) = writeln!(file, "{command}") {
+            eprintln!("[X] Failed to write to history file: {e}");
         }
     } else {
-        eprintln!("Failed to open: {}", path.display());
+        eprintln!("[X] Failed to open history file");
     }
 }
+
