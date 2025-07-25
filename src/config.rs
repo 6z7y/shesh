@@ -117,7 +117,7 @@ pub fn run_startup(config: &Config) {
 pub fn append_to_history(command: &str) {
     let path = history_file_path();
 
-    if path.parent().map_or(false, |p| create_dir_all(p).is_err()) {
+    if path.parent().is_some_and(|p| create_dir_all(p).is_err()) {
         eprintln!("[X] Failed to create history directory");
         return;
     }

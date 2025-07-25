@@ -76,9 +76,9 @@ fn main() {
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
 
     unsafe {
-        // تجاهل Ctrl+C في الشيل الرئيسي
+        // Ignore Ctrl+C in the main shell
         libc::signal(libc::SIGINT, libc::SIG_IGN);
-        // تجاهل Ctrl+\
+        // Ignore Ctrl+\
         libc::signal(libc::SIGQUIT, libc::SIG_IGN);
     }
 

@@ -30,12 +30,12 @@ static OPERATORS: &[(&str, Operator)] = &[
 
 // Main parsing function - entry point
 pub fn parse_syntax(input: &str) -> ParsedCommand {
-    // إذا كان الإدخال مشغلاً واحداً فقط من OPERATORS
+    // If the input is a single operator from OPERATORS
     if OPERATORS.iter().any(|(op, _)| input == *op) {
-        return ParsedCommand::Single(vec![]); // قائمة فارغة
+        return ParsedCommand::Single(vec![]); // Empty list
     }
 
-    // البقية تبقى كما هي
+    // The rest remains the same
     OPERATORS.iter().find_map(|(op_str, op_enum)| {
         find_outside_quotes(input, op_str).map(|index| {
             let (left, right_with_op) = input.split_at(index);
@@ -82,7 +82,7 @@ fn tokenize(input: &str) -> Vec<String> {
 
     while let Some(c) = chars.next() {
         if found_comment {
-            continue; // تجاهل كل شيء بعد #
+            continue; // Ignore everything after #
         }
         
         match c {

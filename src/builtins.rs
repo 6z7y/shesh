@@ -15,7 +15,7 @@ pub fn cd(args: &[&str]) -> io::Result<()> {
     let path = expand_tilde(dir);
     
     env::set_current_dir(&path).map_err(|e| {
-        let msg = format!("cd: {}: {}", path.display(), e);
+        let msg = format!("cd: {}: {e}", path.display());
         io::Error::other(msg)
     })
 }
@@ -38,7 +38,7 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
     let args_cstr: Vec<CString> = all_args
         .map(|s| CString::new(s).map_err(|e| io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("Invalid argument: {}", e)
+            format!("Invalid argument: {e}")
         )))
         .collect::<Result<_, _>>()?;
     
@@ -72,7 +72,7 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
                         0 => Ok(()),
                         127 => Err(io::Error::new(
                             io::ErrorKind::NotFound,
-                            format!("'{}': isn't installed.", command)
+                            format!("'{command}': isn't installed.")
                         )),
                         _ => Ok(()) // Ignore other exit codes (commands handle their own errors)
                     }
@@ -83,7 +83,7 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
                         if sig != libc::SIGINT && sig != libc::SIGTERM {
                             return Err(io::Error::new(
                                 io::ErrorKind::Interrupted,
-                                format!("Command terminated by signal {}", sig)
+                                format!("Command terminated by signal {sig}")
                             ));
                         }
                     }

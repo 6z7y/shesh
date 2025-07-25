@@ -137,7 +137,7 @@ pub fn run_background(command: ParsedCommand) -> io::Result<()> {
             std::process::exit(0);
         },
         pid if pid > 0 => {
-            println!("[{}] Running in background", pid);
+            println!("[{pid}] Running in background");
             Ok(())
         },
         _ => Err(io::Error::last_os_error())
