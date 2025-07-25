@@ -4,11 +4,6 @@ use std::{
     path::{PathBuf, Path}
 };
 
-use crate::{
-    shell,
-};
-
-
 pub struct Config {
     pub prompt: Option<String>,
     pub startup: Vec<String>,
@@ -24,6 +19,11 @@ impl Default for Config {
 }
 
 //config file
+pub fn config_file_path() -> PathBuf {
+    PathBuf::from(env::var("HOME").unwrap())
+        .join(".config/shesh/shesh.24")
+}
+
 pub fn init()->Config{
     let config_path = config_file_path();
 
@@ -36,11 +36,6 @@ pub fn init()->Config{
         let _ = fs::write(&config_path, default);
     }
     load_config(&config_path)
-}
-
-pub fn config_file_path() -> PathBuf {
-    PathBuf::from(env::var("HOME").unwrap())
-        .join(".config/shesh/shesh.24")
 }
 
 pub fn load_config(path:&Path)->Config{
@@ -76,9 +71,8 @@ fn parse_config(content: &str) -> Config {
 
 pub fn run_startup(config: &Config) {
     for cmd_line in &config.startup {
-        let tokens = shell::parse_input(cmd_line).unwrap_or_default();
-        if !tokens.is_empty() {
-            if let Err(e) = crate::b_mod::execute_command(&tokens) { // تحديث المسار
+        if !cmd_line.trim().is_empty() {
+            if let Err(e) = crate::shell::exec(cmd_line) {
                 eprintln!("[X] Startup failed: {e}");
             }
         }
@@ -95,14 +89,16 @@ pub fn append_to_history(command: &str) {
     let path = history_file_path();
 
     if let Some(parent) = path.parent() {
-        let _ = create_dir_all(parent);
-    } 
+        if create_dir_all(parent).is_err() {
+            eprintln!("Failed to create directory: {}", parent.display());
+        }
+    }
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        let _ = writeln!(file, "{command}");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
+        if writeln!(file, "{command}").is_err() {
+            eprintln!("Failed to write to: {}", path.display());
+        }
+    } else {
+        eprintln!("Failed to open: {}", path.display());
     }
 }

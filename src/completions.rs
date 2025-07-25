@@ -82,7 +82,7 @@ impl MyCompleter {
 
         let mut writer = BufWriter::new(file);
         for sub in subcommands {
-            writeln!(writer, "{}", sub)?;
+            writeln!(writer, "{sub}")?;
         }
 
         Ok(())
@@ -133,7 +133,7 @@ impl MyCompleter {
         subs
     }
 
-    /// Handle file/directory completions
+/// Handle file/directory completions
     fn complete_files(&self, current: &str, span: Span) -> Vec<Suggestion> {
         let last_slash = current.rfind('/').map_or(0, |i| i + 1);
         let (base, partial) = current.split_at(last_slash);
@@ -141,7 +141,7 @@ impl MyCompleter {
         let expanded_base = if base.is_empty() {
             PathBuf::from(".")
         } else {
-            expand_tilde(base).unwrap_or_else(|_| PathBuf::from(base))
+            expand_tilde(base) // Remove .into()
         };
 
         if !expanded_base.is_dir() {
@@ -171,7 +171,7 @@ impl MyCompleter {
                 }
 
                 let value = if entry.path().is_dir() {
-                    format!("{}/", name)
+                    format!("{name}/")
                 } else {
                     name.to_string()
                 };

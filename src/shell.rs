@@ -1,144 +1,104 @@
-use crate::utils::expand;
-use crate::b_mod; // تحديث المسار
+use std::{
+    io,
+};
+use libc::{fork};
+use crate::{
+    parse::{parse_syntax,process_tokens,ParsedCommand,Operator},
+    builtins::{cd,execute_external,help},
+    process_exec::{run_pipe,flatten_pipes}
+};
 
-pub fn execute(input: &str) -> Result<(), String> {
-    let tokens = parse_input(input)?;
-    let expanded_tokens = expand_tokens(&tokens)?;
-    b_mod::execute_command(&expanded_tokens) // تحديث المسار
+// Main execution entry point
+pub fn exec(cmd: &str) -> io::Result<()> {
+    // Step 1: Parse input string into command structure
+    let command = parse_syntax(cmd);
+    
+    // Step 2: Execute the parsed command
+    run_command(command)
 }
 
-fn expand_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
-    tokens.iter()
-        .map(|token| {
-            if token.starts_with('"') && token.ends_with('"') {
-                expand(&token[1..token.len()-1])
-            } else if token.starts_with('\'') && token.ends_with('\'') {
-                Ok(token[1..token.len()-1].to_string())
-            } else {
-                expand(token)
+// Executes commands based on their parsed structure
+fn run_command(cmd: ParsedCommand) -> io::Result<()> {
+    match cmd {
+        // Simple command case (e.g., "ls -l")
+        ParsedCommand::Single(args) => {
+            if args.is_empty() {
+                return Ok(());
             }
-        })
-        .collect()
-}
+            // Step 1: Process tokens (expand variables, wildcards)
+            let str_args: Vec<String> = process_tokens(ParsedCommand::Single(args));
+            
+            // Step 2: Separate command name and arguments
+            let cmd = str_args[0].as_str();
+            let rest: Vec<&str> = str_args[1..].iter().map(|s| s.as_str()).collect();
 
-pub fn parse_input(input: &str) -> Result<Vec<String>, String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut quote_char = '\0';
-    let mut escape_next = false;
-    
-    for c in input.chars() {
-        match c {
-            '\\' if !escape_next => escape_next = true,
-            '"' | '\'' if !escape_next => {
-                if !in_quotes {
-                    in_quotes = true;
-                    quote_char = c;
-                } else if c == quote_char {
-                    in_quotes = false;
-                } else {
-                    current.push(c);
+            // Step 3: Execute based on command type
+            match cmd {
+                // Built-in commands
+                "cd" => cd(&rest),  // Change directory
+                "exit" => std::process::exit(0),  // Exit shell
+                "help" => {  // Show help
+                    println!("{}", help());
+                    Ok(())
                 }
+                // External commands
+                _ => execute_external(cmd, &rest),
             }
-            ' ' | '\t' if !in_quotes && !escape_next => {
-                if !current.is_empty() {
-                    tokens.push(current);
-                    current = String::new();
+        }
+
+        // Compound commands with operators (e.g., "cmd1 && cmd2")
+        ParsedCommand::BinaryOp(left, op, right) => {
+            match op {
+                // Sequential execution (;)
+                Operator::Seq => {
+                    // Execute left command, then right regardless of result
+                    run_command(*left)?;
+                    run_command(*right)
                 }
-            }
-            _ => {
-                if escape_next {
-                    current.push('\\');
+                // Logical AND (&&)
+                Operator::And => {
+                    // Only execute right if left succeeds
+                    if run_command(*left).is_ok() {
+                        run_command(*right)
+                    } else {
+                        Ok(())
+                    }
                 }
-                current.push(c);
-                escape_next = false;
+                // Logical OR (||)
+                Operator::Or => {
+                    // Only execute right if left fails
+                    if run_command(*left).is_err() {
+                        run_command(*right)
+                    } else {
+                        Ok(())
+                    }
+                }
+                Operator::Pipe => {
+                    let commands = flatten_pipes(vec![*left, *right]);
+                    run_pipe(commands)
+                }
+                Operator::Background => {
+                    let pid = unsafe { fork() };
+                    match pid {
+                        0 => { // Child process
+                            // Reset signal handlers in child
+                            unsafe {
+                                libc::signal(libc::SIGINT, libc::SIG_DFL);
+                                libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+                            }
+                            let _ = run_command(*left); // Ignore result in background
+                            unsafe { libc::exit(0); } // <-- Add unsafe block here
+                        },
+                        pid if pid > 0 => {
+                            println!("Started in background (pid: {pid})");
+                            // Detach from child process
+                            unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN); }
+                            Ok(())
+                        },
+                        _ => Err(io::Error::last_os_error())
+                    }
+                }
             }
         }
     }
-    
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    
-    let mut result = Vec::new();
-    for token in tokens {
-        let mut temp = Vec::new();
-        let mut current_part = String::new();
-        let mut chars = token.chars().peekable();
-        
-        while let Some(c) = chars.next() {
-            // Handle 24> as a single token
-            if c == '2' && chars.peek() == Some(&'4') {
-                chars.next(); // Skip '4'
-                if chars.peek() == Some(&'>') {
-                    chars.next(); // Skip '>'
-                    if !current_part.is_empty() {
-                        temp.push(current_part);
-                        current_part = String::new();
-                    }
-                    temp.push("24>".to_string());
-                    continue;
-                } else {
-                    current_part.push('2');
-                    current_part.push('4');
-                    if let Some('>') = chars.peek() {
-                        chars.next();
-                        current_part.push('>');
-                    }
-                }
-            }
-            
-            // Handle other symbols
-            if c == '>' {
-                let mut symbol = c.to_string();
-                if let Some('>') = chars.peek() {
-                    symbol.push(chars.next().unwrap());
-                }
-                
-                if !current_part.is_empty() {
-                    temp.push(current_part);
-                    current_part = String::new();
-                }
-                temp.push(symbol);
-                continue;
-            }
-            
-            if c == '1' || c == '2' || c == '&' {
-                if let Some('>') = chars.peek() {
-                    let mut symbol = c.to_string();
-                    symbol.push(chars.next().unwrap());
-                    
-                    if let Some('>') = chars.peek() {
-                        symbol.push(chars.next().unwrap());
-                    }
-                    
-                    if !current_part.is_empty() {
-                        temp.push(current_part);
-                        current_part = String::new();
-                    }
-                    temp.push(symbol);
-                    continue;
-                }
-            }
-            
-            if ";|&<".contains(c) {
-                if !current_part.is_empty() {
-                    temp.push(current_part);
-                    current_part = String::new();
-                }
-                temp.push(c.to_string());
-            } else {
-                current_part.push(c);
-            }
-        }
-        
-        if !current_part.is_empty() {
-            temp.push(current_part);
-        }
-        
-        result.extend(temp);
-    }
-    
-    Ok(result)
 }
