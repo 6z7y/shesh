@@ -2,15 +2,17 @@ use std::{
     io,
 };
 use crate::{
-    parse::{parse_syntax,process_tokens,ParsedCommand,Operator},
-    builtins::{cd,execute_external,help},
-    process_exec::{run_pipe,flatten_pipes,run_background}
+    builtins::{cd, execute_external, expand_aliases, handle_alias, handle_export_cmd, help},
+    parse::{parse_syntax, process_tokens, Operator, ParsedCommand},
+    process_exec::{flatten_pipes, run_background, run_pipe,handle_redirect}
 };
 
 // Main execution entry point
 pub fn exec(cmd: &str) -> io::Result<()> {
+    // Check alias command before
+    let expanded_cmd = expand_aliases(cmd);
     // Step 1: Parse input string into command structure
-    let command = parse_syntax(cmd);
+    let command = parse_syntax(&expanded_cmd);
 
     // Step 2: Execute the parsed command
     run(command)
@@ -19,29 +21,28 @@ pub fn exec(cmd: &str) -> io::Result<()> {
 // Executes commands based on their parsed structure
 pub fn run(cmd: ParsedCommand) -> io::Result<()> {
     match cmd {
-        // Simple command case (e.g., "ls -l")
         ParsedCommand::Single(args) => {
             if args.is_empty() {
                 return Ok(());
             }
-            // Step 1: Process tokens (expand variables, wildcards)
+
             let str_args: Vec<String> = process_tokens(ParsedCommand::Single(args));
-            
-            // Step 2: Separate command name and arguments
             let cmd = str_args[0].as_str();
             let rest: Vec<&str> = str_args[1..].iter().map(|s| s.as_str()).collect();
 
-            // Step 3: Execute based on command type
             match cmd {
-                // Built-in commands
-                "cd" => cd(&rest),  // Change directory
-                "exit" => std::process::exit(0),  // Exit shell
-                "help" => {  // Show help
+                "alias" => handle_alias(&str_args[1..].join(" ")),
+                "cd" => cd(&rest),
+                "exit" => std::process::exit(0),
+                "export" => {
+                    let rest_str: Vec<String> = rest.iter().map(|&s| s.to_string()).collect();
+                    handle_export_cmd(&rest_str)
+                },
+                "help" => {
                     println!("{}", help());
                     Ok(())
-                }
-                // External commands
-                _ => execute_external(cmd, &rest),
+                },
+                _ => execute_external(cmd, &rest)
             }
         }
 
@@ -76,7 +77,8 @@ pub fn run(cmd: ParsedCommand) -> io::Result<()> {
                     let commands = flatten_pipes(vec![*left, *right]);
                     run_pipe(commands)
                 }
-                Operator::Background => run_background(*left)
+                Operator::Background => run_background(*left),
+                Operator::Redirect(redirect_type) => handle_redirect(*left, redirect_type, *right),
             }
         }
     }

@@ -1,8 +1,9 @@
 use std::{
+    fs::{File,OpenOptions},
     io,ptr,
     ffi::CString,
-    process::exit,
-    os::fd::{AsFd, AsRawFd}
+    process::{exit,Stdio,Command},
+    os::fd::{AsFd, AsRawFd,IntoRawFd,FromRawFd}
 };
 
 use libc::{
@@ -13,9 +14,151 @@ use libc::{
     dup2,close,waitpid
 };
 use crate::{
-    parse::{ParsedCommand, Operator},
+    parse::{ParsedCommand, Operator,RedirectType},
     shell::run
 };
+
+pub fn handle_redirect(
+    left_cmd: ParsedCommand,
+    redirect_type: RedirectType,
+    right_cmd: ParsedCommand,
+) -> io::Result<()> {
+    // Extract filename from right command
+    let filename = match right_cmd {
+        ParsedCommand::Single(args) => args.join(" "),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Right side of redirection must be a filename",
+            ))
+        }
+    };
+
+    if filename.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Missing filename for redirection",
+        ));
+    }
+
+    // Build the base command
+    let mut cmd = match left_cmd {
+        ParsedCommand::Single(args) => {
+            if args.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Empty command",
+                ));
+            }
+            let mut cmd = Command::new(&args[0]);
+            if args.len() > 1 {
+                cmd.args(&args[1..]);
+            }
+            cmd
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Complex commands not supported for redirects",
+            ))
+        }
+    };
+
+    // Handle each redirection type
+    match redirect_type {
+        RedirectType::Stdout => {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(filename)?;
+            cmd.stdout(file).stderr(Stdio::inherit());
+        }
+        RedirectType::StdoutAppend => {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(filename)?;
+            cmd.stdout(file).stderr(Stdio::inherit());
+        }
+        RedirectType::Stderr => {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(filename)?;
+            cmd.stderr(file).stdout(Stdio::inherit());
+        }
+        RedirectType::StderrAppend => {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(filename)?;
+            cmd.stderr(file).stdout(Stdio::inherit());
+        }
+        RedirectType::Both => {
+            let file = File::create(filename)?;
+            let fd = file.into_raw_fd();
+            unsafe {
+                cmd.stdout(Stdio::from_raw_fd(fd))
+                    .stderr(Stdio::from_raw_fd(libc::dup(fd)));
+            }
+        }
+        RedirectType::BothAppend => {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(filename)?;
+            let fd = file.into_raw_fd();
+            unsafe {
+                cmd.stdout(Stdio::from_raw_fd(fd))
+                    .stderr(Stdio::from_raw_fd(libc::dup(fd)));
+            }
+        }
+        RedirectType::Stdin => {
+            let file = File::open(filename)?;
+            cmd.stdin(file);
+        }
+    }
+
+    // Execute the command with appropriate error handling
+    let status = cmd.status()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Command failed with status: {}", status),
+        ));
+    }
+
+    Ok(())
+}
+
+// // Helper function to build Command from ParsedCommand
+// fn build_command(cmd: ParsedCommand) -> io::Result<Command> {
+//     if let ParsedCommand::Single(args) = cmd {
+//         let str_args = process_tokens(ParsedCommand::Single(args));
+//         if str_args.is_empty() {
+//             return Err(io::Error::new(
+//                 io::ErrorKind::InvalidInput,
+//                 "Empty command",
+//             ));
+//         }
+//
+//         let mut command = Command::new(&str_args[0]);
+//         if str_args.len() > 1 {
+//             command.args(&str_args[1..]);
+//         }
+//         Ok(command)
+//     } else {
+//         Err(io::Error::new(
+//             io::ErrorKind::InvalidInput,
+//             "Complex commands not supported for redirects",
+//         ))
+//     }
+// }
 
 /// Unified pipe and command execution
 pub fn run_pipe(commands: Vec<ParsedCommand>) -> io::Result<()> {

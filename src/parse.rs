@@ -10,9 +10,21 @@ pub enum ParsedCommand {
     BinaryOp(Box<ParsedCommand>, Operator, Box<ParsedCommand>),  // Compound command with operator
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RedirectType {
+    Stdout,       // >
+    StdoutAppend, // >>
+    Stderr,       // 2>
+    StderrAppend, // 2>>
+    Both,         // &>
+    BothAppend,   // &>>
+    Stdin,        // <
+}
+
 // Define supported shell operators
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Operator {
+    Redirect(RedirectType), // RedirectOut, AppendOut, RedirectIn
     And,         // && (logical AND)
     Or,          // || (logical OR)
     Pipe,        // | (pipe)
@@ -21,6 +33,13 @@ pub enum Operator {
 }
 
 static OPERATORS: &[(&str, Operator)] = &[
+    ("&>>", Operator::Redirect(RedirectType::BothAppend)),
+    ("&>", Operator::Redirect(RedirectType::Both)),
+    ("2>>", Operator::Redirect(RedirectType::StderrAppend)),
+    ("2>", Operator::Redirect(RedirectType::Stderr)),
+    (">>", Operator::Redirect(RedirectType::StdoutAppend)),
+    (">", Operator::Redirect(RedirectType::Stdout)),
+    ("<", Operator::Redirect(RedirectType::Stdin)),
     (";", Operator::Seq),
     ("&&", Operator::And),
     ("||", Operator::Or),
@@ -123,12 +142,33 @@ pub fn process_tokens(cmd: ParsedCommand) -> Vec<String> {
                     _ if part.starts_with('$') => {
                         result.push(env::var(&part[1..]).unwrap_or_default());
                     },
-                    _ if part == "*" => {
-                        fs::read_dir(".").ok().into_iter()
-                            .flatten()
-                            .filter_map(|e| e.ok())
-                            .for_each(|e| result.push(e.file_name().to_string_lossy().into_owned()));
-                    },
+                    _ if part.contains('*') => {
+                        // Handle directory/* pattern
+                        if let Some(slash_pos) = part.rfind('/') {
+                            let (dir, pattern) = part.split_at(slash_pos + 1);
+                            if pattern == "*" {
+                                if let Ok(entries) = fs::read_dir(dir) {
+                                    for entry in entries.flatten() {
+                                        let filename = entry.file_name().to_string_lossy().into_owned();
+                                        result.push(format!("{dir}{filename}"));
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                        // Handle simple * in current directory
+                        else if part == "*" {
+                            if let Ok(entries) = fs::read_dir(".") {
+                                for entry in entries.flatten() {
+                                    let filename = entry.file_name().to_string_lossy().into_owned();
+                                    result.push(filename);
+                                }
+                                continue;
+                            }
+                        }
+                        // If we get here, pass the original pattern
+                        result.push(part);
+                    }
                     _ if part.starts_with('~') => {
                         if let Some(home) = env::var_os("HOME") {
                             result.push(format!("{}{}", home.to_string_lossy(), &part[1..]));

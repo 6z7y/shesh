@@ -1,8 +1,10 @@
 use std::{
+    collections::HashMap,
     env,
+    ffi::CString,
     ptr,
     io,
-    ffi::CString,
+    sync::{Mutex,OnceLock}
 };
 use libc::{dup2, fork, execvp, waitpid};
 
@@ -10,23 +12,72 @@ use crate::{
     utils::expand_tilde
 };
 
+// Alias storage
+static ALIASES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+// Environment variables storage
+static ENV_VARS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn get_aliases() -> &'static Mutex<HashMap<String, String>> {
+    ALIASES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn handle_alias(input: &str) -> io::Result<()> {
+    let aliases = get_aliases();
+    let mut aliases = aliases.lock().unwrap();
+
+    if input.is_empty() {
+        for (name, cmd) in &*aliases {
+            println!("alias {name}='{cmd}'");
+        }
+        return Ok(());
+    }
+
+    // Support both formats: name=value and name value
+    let parts: Vec<&str> = input.splitn(2, ['=', ' ']).collect();  // Using array instead of closure
+    
+    match parts.as_slice() {
+        [name, value] => {
+            aliases.insert(name.trim().to_string(), value.trim().to_string());
+            Ok(())
+        },
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Usage: alias name=value"
+        ))
+    }
+}
+
+pub fn expand_aliases(input: &str) -> String {
+    let Some(first_word) = input.split_whitespace().next() else {
+        return input.to_string();
+    };
+
+    let Some(aliases) = ALIASES.get() else {
+        return input.to_string();
+    };
+
+    let aliases = aliases.lock().unwrap();
+    aliases.get(first_word)
+        .map(|expanded| input.replacen(first_word, expanded, 1))
+        .unwrap_or_else(|| input.to_string())
+}
+
 pub fn cd(args: &[&str]) -> io::Result<()> {
     let dir = args.first().unwrap_or(&"~");
     let path = expand_tilde(dir);
     
     env::set_current_dir(&path).map_err(|e| {
-        let msg = format!("cd: {}: {e}", path.display());
+        let msg = format!("cd: '{}': {e}", path.display());
         io::Error::other(msg)
     })
 }
 
-pub fn help()-> String {
-    "
+pub fn help()-> String {"
     Available builtins:
     - cd [dir] : Change directory
     - exit     : Exit the shell
-    - help     : Show this help
-    ".to_string()
+    - help     : Show this help".to_string()
 }
 
 pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
@@ -72,7 +123,7 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
                         0 => Ok(()),
                         127 => Err(io::Error::new(
                             io::ErrorKind::NotFound,
-                            format!("'{command}': isn't installed.")
+                            format!("shesh: '{command}' command not found.")
                         )),
                         _ => Ok(()) // Ignore other exit codes (commands handle their own errors)
                     }
@@ -92,4 +143,40 @@ pub fn execute_external(command: &str, args: &[&str]) -> io::Result<()> {
             }
         }
     }
+}
+
+/// Handle export command - condensed version
+pub fn handle_export_cmd(args: &[String]) -> io::Result<()> {
+    if args.is_empty() {
+        // Create compact HashMap to avoid duplication
+        
+        let mut vars = HashMap::new();
+        
+        // First: System variables
+        env::vars().for_each(|(k, v)| { vars.insert(k, v); });
+        
+        // Second: Custom variables (override system variables if they exist)
+        if let Some(env_vars) = ENV_VARS.get() {
+            env_vars.lock().unwrap().iter()
+                .for_each(|(k, v)| { vars.insert(k.clone(), v.clone()); });
+        }
+        
+        // Conversion and sorting
+        let mut sorted_vars: Vec<_> = vars.into_iter().collect();
+        sorted_vars.sort_unstable_by_key(|(k, _)| k.clone());
+        
+        // Display
+        if let Some(max) = sorted_vars.iter().map(|(k, _)| k.len()).max() {
+            sorted_vars.iter().for_each(|(k, v)| println!("{k:<max$} {v}"));
+        }
+    } else {
+        args.iter().filter_map(|a| a.split_once('='))
+            .for_each(|(k, v)| {
+                ENV_VARS.get_or_init(|| Mutex::new(HashMap::new()))
+                    .lock().unwrap()
+                    .insert(k.into(), v.into());
+                unsafe { env::set_var(k, v); }
+            });
+    }
+    Ok(())
 }

@@ -9,9 +9,9 @@ mod utils;
 
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, FileBackedHistory,
-    MenuBuilder, KeyCode, KeyModifiers, Reedline, ReedlineEvent, ReedlineMenu, Signal
+    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal
 };
+use reedline::{EditCommand};
 
 use crate::{
     completions::create_default_completer,
@@ -34,6 +34,7 @@ fn main() {
 
     // [4] Set up auto-completion
     let completer = create_default_completer();
+
     let menu = ReedlineMenu::EngineCompleter(Box::new(
         ColumnarMenu::default()
             .with_name("completion_menu")
@@ -42,6 +43,13 @@ fn main() {
 
     // [5] Configure keybindings for Emacs mode
     let mut keybindings = default_emacs_keybindings();
+
+
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('c'),
+        ReedlineEvent::Edit(vec![EditCommand::Clear]), // Clears the text in the same line
+    );
 
     // [6] Bind Tab key to trigger and navigate completion menu
     keybindings.add_binding(
@@ -88,11 +96,11 @@ fn main() {
             Ok(Signal::Success(buf)) if !buf.trim().is_empty() => {
                 config::append_to_history(&buf);
                 if let Err(e) = shell::exec(&buf) {
-                    eprintln!("\x1b[31m- {e}\x1b[0m");
+                    eprintln!("{e}");
                 }
             }
             Ok(Signal::CtrlD) => break,
-            Ok(Signal::CtrlC) => continue,
+            Ok(Signal::Success(_)) => continue, // If empty, continue
             _ => eprintln!("Reedline error"),
         }
     }
