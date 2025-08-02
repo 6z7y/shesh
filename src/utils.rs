@@ -1,7 +1,4 @@
-use std::{
-    env,
-    path::PathBuf
-};
+use std::{ env,path::PathBuf };
 
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(stripped) = path.strip_prefix('~') {
