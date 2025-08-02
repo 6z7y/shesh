@@ -2,7 +2,7 @@ use std::{
     io,
 };
 use crate::{
-    builtins::{cd, execute_external, expand_aliases, handle_alias, handle_export_cmd, help},
+    builtins::{handle_24_command, cd, execute_external, expand_aliases, handle_alias, handle_export_cmd, help},
     parse::{parse_syntax, process_tokens, Operator, ParsedCommand},
     process_exec::{flatten_pipes, run_background, run_pipe,handle_redirect}
 };
@@ -31,6 +31,7 @@ pub fn run(cmd: ParsedCommand) -> io::Result<()> {
             let rest: Vec<&str> = str_args[1..].iter().map(|s| s.as_str()).collect();
 
             match cmd {
+                "24!" => handle_24_command(&rest),
                 "alias" => handle_alias(&str_args[1..].join(" ")),
                 "cd" => cd(&rest),
                 "exit" => std::process::exit(0),

@@ -4,7 +4,7 @@ use std::{
     ffi::CString,
     ptr,
     io,
-    sync::{Mutex,OnceLock}
+    sync::{Arc, Mutex, OnceLock}
 };
 use libc::{dup2, fork, execvp, waitpid};
 
@@ -16,7 +16,45 @@ use crate::{
 static ALIASES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
 // Environment variables storage
-static ENV_VARS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+pub static ENV_VARS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+static VIM_MODE: OnceLock<Arc<Mutex<bool>>> = OnceLock::new();
+
+pub fn init_vim_mode() {
+    VIM_MODE.get_or_init(|| Arc::new(Mutex::new(false)));
+}
+
+pub fn toggle_vim_mode() -> bool {
+    let mode = VIM_MODE.get_or_init(|| Arc::new(Mutex::new(false)));
+    let mut enabled = mode.lock().unwrap();
+    *enabled = !*enabled;
+    *enabled
+}
+
+// pub fn get_vim_mode() -> bool {
+//     let mode = VIM_MODE.get_or_init(|| Arc::new(Mutex::new(false)));
+//     *mode.lock().unwrap()
+// }
+
+pub fn handle_24_command(args: &[&str]) -> io::Result<()> {
+    if args.is_empty() {
+        println!("24! commands:");
+        println!("  vim_keys - Toggle Vim keybindings");
+        return Ok(());
+    }
+
+    match args[0] {
+        "vim_keys" => {
+            let enabled = toggle_vim_mode();
+            println!("Vim keys {}", if enabled { "enabled" } else { "disabled" });
+            Ok(())
+        },
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Unknown 24! command"
+        ))
+    }
+}
 
 fn get_aliases() -> &'static Mutex<HashMap<String, String>> {
     ALIASES.get_or_init(|| Mutex::new(HashMap::new()))

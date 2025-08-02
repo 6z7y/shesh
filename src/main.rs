@@ -9,22 +9,26 @@ mod utils;
 
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal
+    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, Vi, 
+    FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, 
+    Reedline, ReedlineEvent, ReedlineMenu, Signal, EditCommand
 };
-use reedline::{EditCommand};
 
 use crate::{
     completions::create_default_completer,
-    prompt::SimplePrompt,
+    prompt::PromptSystem,
 };
 
 fn main() {
+    // Initialize VIM_MODE
+    builtins::init_vim_mode();
+    
     // [1] Load configuration and run startup script
     let cfg = config::init();
     config::run_startup(&cfg);
 
     // [2] Initialize prompt style
-    let prompt = SimplePrompt::new();
+    let prompt = PromptSystem::new(cfg.prompt.clone());
 
     // [3] Set up command history with file persistence
     let history = Box::new(
@@ -43,15 +47,11 @@ fn main() {
 
     // [5] Configure keybindings for Emacs mode
     let mut keybindings = default_emacs_keybindings();
-
-
     keybindings.add_binding(
         KeyModifiers::CONTROL,
         KeyCode::Char('c'),
-        ReedlineEvent::Edit(vec![EditCommand::Clear]), // Clears the text in the same line
+        ReedlineEvent::Edit(vec![EditCommand::Clear]),
     );
-
-    // [6] Bind Tab key to trigger and navigate completion menu
     keybindings.add_binding(
         KeyModifiers::NONE,
         KeyCode::Tab,
@@ -60,8 +60,6 @@ fn main() {
             ReedlineEvent::MenuNext,
         ]),
     );
-
-    // [7] Bind Shift+Tab to navigate backward in completion menu
     keybindings.add_binding(
         KeyModifiers::SHIFT,
         KeyCode::BackTab,
@@ -71,7 +69,7 @@ fn main() {
         ]),
     );
 
-    // [8] Build the line editor with Emacs keybindings, history, completer, and hinter
+    // [6] Build the line editor
     let mut editor = Reedline::create()
         .with_history(history)
         .with_completer(completer)
@@ -84,23 +82,33 @@ fn main() {
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
 
     unsafe {
-        // Ignore Ctrl+C in the main shell
         libc::signal(libc::SIGINT, libc::SIG_IGN);
-        // Ignore Ctrl+\
         libc::signal(libc::SIGQUIT, libc::SIG_IGN);
     }
 
-    // [9] Main REPL loop
+    // [7] Main REPL loop
     loop {
         match editor.read_line(&prompt) {
             Ok(Signal::Success(buf)) if !buf.trim().is_empty() => {
                 config::append_to_history(&buf);
+
+                if buf.trim() == "24! vim_keys" {
+                    let enabled = builtins::toggle_vim_mode();
+                    println!("Vim keys {}", if enabled { "enabled" } else { "disabled" });
+                    
+                    editor = editor.with_edit_mode(if enabled {
+                        Box::new(Vi::default())
+                    } else {
+                        Box::new(Emacs::new(default_emacs_keybindings()))
+                    });
+                }
+
                 if let Err(e) = shell::exec(&buf) {
                     eprintln!("{e}");
                 }
             }
             Ok(Signal::CtrlD) => break,
-            Ok(Signal::Success(_)) => continue, // If empty, continue
+            Ok(Signal::Success(_)) => continue,
             _ => eprintln!("Reedline error"),
         }
     }
