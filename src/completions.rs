@@ -191,6 +191,7 @@ impl MyCompleter {
 
 impl Completer for MyCompleter {
     fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+        
         let line = &line[..pos];
         let parts: Vec<&str> = line.split_whitespace().collect();
 
