@@ -33,7 +33,6 @@ pub fn handle_redirect(
             ))
         }
     };
-
     if filename.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
