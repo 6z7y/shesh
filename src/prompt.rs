@@ -21,7 +21,7 @@ impl Prompt for PromptSystem {
             .ok()
             .map(|p| p.display().to_string())
             .unwrap_or("no path".into());
-        
+
         let homedir = env::var("HOME").unwrap_or_default();
         let new_path = path.replace(&homedir, "~");
 
@@ -29,20 +29,30 @@ impl Prompt for PromptSystem {
         let len = segments.len();
 
         let base_prompt = if segments.is_empty() {
-            if new_path.starts_with('/') { "/> " } else { "> " }.to_string()
+            if new_path.starts_with('/') {
+                "/> "
+            } else {
+                "> "
+            }
+            .to_string()
         } else {
             let start = if new_path.starts_with('/') { "/" } else { "" };
-            let shortened = segments.iter().enumerate().fold(String::new(), |mut acc, (i, seg)| {
-                if i > 0 { acc.push('/'); }
-                if i == len - 1 {
-                    acc.push_str(seg);
-                } else if seg.starts_with('.') {
-                    acc.push_str(&seg[..2]);
-                } else {
-                    acc.push(seg.chars().next().unwrap_or(' '));
-                }
-                acc
-            });
+            let shortened = segments
+                .iter()
+                .enumerate()
+                .fold(String::new(), |mut acc, (i, seg)| {
+                    if i > 0 {
+                        acc.push('/');
+                    }
+                    if i == len - 1 {
+                        acc.push_str(seg);
+                    } else if seg.starts_with('.') {
+                        acc.push_str(&seg[..2]);
+                    } else {
+                        acc.push(seg.chars().next().unwrap_or(' '));
+                    }
+                    acc
+                });
             format!("\x1b[32m{start}{shortened}>\x1b[0m ")
         };
 
@@ -58,11 +68,11 @@ impl Prompt for PromptSystem {
             PromptEditMode::Vi(PromptViMode::Normal) => {
                 print!("\x1b[0 q"); // Reset cursor to default shape
                 std::borrow::Cow::Borrowed("\x1b[33m[N]\x1b[0m ")
-            },
+            }
             PromptEditMode::Vi(PromptViMode::Insert) => {
                 print!("\x1b[6 q"); // Vertical cursor shape (|) for Insert mode
                 std::borrow::Cow::Borrowed("\x1b[32m[I]\x1b[0m ")
-            },
+            }
             _ => std::borrow::Cow::Borrowed(""), // No cursor shape change
         }
     }
@@ -71,7 +81,10 @@ impl Prompt for PromptSystem {
         std::borrow::Cow::Borrowed("::: ")
     }
 
-    fn render_prompt_history_search_indicator(&self, _history_search: PromptHistorySearch) -> std::borrow::Cow<'static, str> {
+    fn render_prompt_history_search_indicator(
+        &self,
+        _history_search: PromptHistorySearch,
+    ) -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("⭠ ")
     }
 }
