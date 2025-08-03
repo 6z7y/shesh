@@ -1,6 +1,6 @@
 use std::{
     env,
-    fs::{self, create_dir_all, OpenOptions},
+    fs::{self, OpenOptions, create_dir_all},
     io::Write,
     path::{Path, PathBuf},
     process::exit,

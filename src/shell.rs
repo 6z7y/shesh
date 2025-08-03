@@ -1,11 +1,12 @@
-use std::{
-    io,
-};
 use crate::{
-    builtins::{handle_24_command, cd, execute_external, expand_aliases, handle_alias, handle_export_cmd, help},
-    parse::{parse_syntax, process_tokens, Operator, ParsedCommand},
-    process_exec::{flatten_pipes, run_background, run_pipe,handle_redirect}
+    builtins::{
+        cd, execute_external, expand_aliases, handle_24_command, handle_alias, handle_export_cmd,
+        help,
+    },
+    parse::{Operator, ParsedCommand, parse_syntax, process_tokens},
+    process_exec::{flatten_pipes, handle_redirect, run_background, run_pipe},
 };
+use std::io;
 
 // Main execution entry point
 pub fn exec(cmd: &str) -> io::Result<()> {
@@ -38,12 +39,12 @@ pub fn run(cmd: ParsedCommand) -> io::Result<()> {
                 "export" => {
                     let rest_str: Vec<String> = rest.iter().map(|&s| s.to_string()).collect();
                     handle_export_cmd(&rest_str)
-                },
+                }
                 "help" => {
                     println!("{}", help());
                     Ok(())
-                },
-                _ => execute_external(cmd, &rest)
+                }
+                _ => execute_external(cmd, &rest),
             }
         }
 

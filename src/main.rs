@@ -9,20 +9,16 @@ mod utils;
 
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, DefaultHinter, Emacs, Vi, 
-    FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, 
-    Reedline, ReedlineEvent, ReedlineMenu, Signal, EditCommand
+    ColumnarMenu, DefaultHinter, EditCommand, Emacs, FileBackedHistory, KeyCode, KeyModifiers,
+    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi, default_emacs_keybindings,
 };
 
-use crate::{
-    completions::create_default_completer,
-    prompt::PromptSystem,
-};
+use crate::{completions::create_default_completer, prompt::PromptSystem};
 
 fn main() {
     // Initialize VIM_MODE
     builtins::init_vim_mode();
-    
+
     // [1] Load configuration and run startup script
     let cfg = config::init();
     config::run_startup(&cfg);
@@ -76,7 +72,12 @@ fn main() {
         .with_menu(menu)
         .with_hinter(Box::new(
             DefaultHinter::default()
-                .with_style(Style::new().underline().italic().fg(Color::Rgb(120, 120, 120)))
+                .with_style(
+                    Style::new()
+                        .underline()
+                        .italic()
+                        .fg(Color::Rgb(120, 120, 120)),
+                )
                 .with_min_chars(1),
         ))
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
@@ -95,7 +96,7 @@ fn main() {
                 if buf.trim() == "24! vim_keys" {
                     let enabled = builtins::toggle_vim_mode();
                     println!("Vim keys {}", if enabled { "enabled" } else { "disabled" });
-                    
+
                     editor = editor.with_edit_mode(if enabled {
                         Box::new(Vi::default())
                     } else {
