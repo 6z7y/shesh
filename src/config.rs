@@ -1,8 +1,9 @@
 use std::{
-    env,io::Write,
+    env,
     fs::{self, create_dir_all, OpenOptions},
-    path::{PathBuf, Path},
-    process::exit
+    io::Write,
+    path::{Path, PathBuf},
+    process::exit,
 };
 
 pub struct Config {
@@ -26,6 +27,11 @@ pub fn get_home() -> PathBuf {
     })
 }
 
+pub fn get_config() -> PathBuf {
+    env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| get_home().join(".config"))
+}
 
 // pub fn get_cache() -> PathBuf {
 //     env::var_os("XDG_CACHE_HOME")
@@ -33,18 +39,15 @@ pub fn get_home() -> PathBuf {
 //         .unwrap_or_else(|| get_home().join(".cache"))
 // }
 
-//config file
-pub fn get_config() -> PathBuf {
-    env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| get_home().join(".config"))
-}
-
 pub fn config_file_path() -> PathBuf {
     get_config().join("shesh").join("shesh.24")
 }
 
+pub fn history_file_path() -> PathBuf {
+    get_home().join(".local/share/shesh/history")
+}
 
+//config file
 pub fn init() -> Config {
     let config_path = config_file_path();
 
@@ -57,19 +60,13 @@ pub fn init() -> Config {
             &config_path,
             "#prompt = \"shesh> \"\n#startup\necho \"shesh ready!\"",
         )
-        .unwrap_or_else(|_| {
-            eprintln!("Unable to create a config file");
-            exit(1)
-        });
+        .expect("Unable to creat config file")
     }
     load_config(&config_path)
 }
 
 pub fn load_config(path: &Path) -> Config {
-    parse_config(&fs::read_to_string(path).unwrap_or_else(|_| {
-        eprintln!("Unable to load a config file");
-        exit(1)
-    }))
+    parse_config(&fs::read_to_string(path).expect("Unable to load a config file"))
 }
 
 fn parse_config(content: &str) -> Config {
@@ -111,10 +108,6 @@ pub fn run_startup(config: &Config) {
 }
 
 //history file
-pub fn history_file_path() -> PathBuf {
-    get_home().join(".local/share/shesh/history")
-}
-
 pub fn append_to_history(command: &str) {
     let path = history_file_path();
 
@@ -131,4 +124,3 @@ pub fn append_to_history(command: &str) {
         eprintln!("[X] Failed to open history file");
     }
 }
-

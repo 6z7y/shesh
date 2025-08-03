@@ -1,4 +1,4 @@
-use std::{ env,path::PathBuf };
+use std::{env, path::PathBuf};
 
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(stripped) = path.strip_prefix('~') {
@@ -19,4 +19,18 @@ pub fn expand_env_vars(input: &str) -> String {
         result = result.replace(&format!("${key}"), &value);
     }
     result
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_utils() {
+        let result = expand_tilde("~/Documents/projects");
+        let user_name = expand_env_vars("$USER");
+        assert_eq!(
+            result,
+            PathBuf::from(format!("/home/{}/Documents/projects", user_name))
+        );
+    }
 }
